@@ -213,6 +213,7 @@ customIso_nspawnRootfs() {
     				done
     				systemd-nspawn --network-interface="${nspawnIface}" -b -D "${customIsoRootfsMountPoint}"
     				systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
+                    systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
     				;;
     				
     		esac
