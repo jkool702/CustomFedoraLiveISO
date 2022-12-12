@@ -332,6 +332,9 @@ customIso_getLorax
 
 customIso_mockBuildAnacondaBootIso() {   
     # build anaconda boot.iso with lorax in mock (setup using the same fedora release version as the custoom ISO image we wanrt to generate)
+	
+	# tweak mock config to ensure dnf is available
+	cat /etc/mock/templates/fedora-branched.tpl | grep -F "config_opts['chroot_setup_cmd']" | grep -q 'dnf' || sed -iE s/'^([ \t]*config_opts\['"'"'chroot_setup_cmd'"'"'\].*)'"'"/'\1 dnf'"'"/ /etc/mock/templates/fedora-branched.tpl
 
 	# setup mock
     mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --init
