@@ -130,6 +130,7 @@ customIso_prepRootfs() {
     dd if=/dev/zero bs=$((( ( ${rootfsSizeGB} * ( 2 ** 30 ) )  - $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') ))) count=1 >> "${customIsoRootfsPath}"
     
     umount -R "${customIsoRootfsMountPoint}"
+    umount -R "${customIsoRootfsPath}"
 
     # extend ext4 filesystem 
     e2fsck -f "${customIsoRootfsPath}"
@@ -336,7 +337,7 @@ customIso_mockBuildAnacondaBootIso() {
     # build anaconda boot.iso with lorax in mock (setup using the same fedora release version as the custoom ISO image we wanrt to generate)
 	
 	# tweak mock config to ensure dnf is available
-	cat /etc/mock/templates/fedora-branched.tpl | grep -F "config_opts['chroot_setup_cmd']" | grep -q 'dnf' || sed -iE s/'^([ \t]*config_opts\['"'"'chroot_setup_cmd'"'"'\].*)'"'"/'\1 dnf'"'"/ /etc/mock/templates/fedora-branched.tpl
+	grep -E "^[ \t]*config_opts\['chroot_setup_cmd'\]" /etc/mock/templates/fedora-branched.tpl | grep -q -E "[ ']dnf[ ']" || sed -i -E s/'^([ \t]*config_opts\['"'"'chroot_setup_cmd'"'"'\].*)'"'"/'\1 dnf'"'"/ /etc/mock/templates/fedora-branched.tpl
 
 	# setup mock
     mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --init
@@ -349,7 +350,7 @@ customIso_mockBuildAnacondaBootIso() {
 	
 	# build anaconda boot.iso with lorax
     dirAutoRename "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}/lorax/anaconda_iso"
-	mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}/lorax/src/" "${customIsoTmpDir}/lorax/src/sbin/lorax" -p Fedora -v "${customIsoReleaseVer}" -r "${customIsoReleaseVer}" -s https://dl.fedoraproject.org/pub/fedora/linux/releases/"${customIsoReleaseVer}"/Everything/x86_64/os/ -s https://dl.fedoraproject.org/pub/fedora/linux/updates/"${customIsoReleaseVer}"/Everything/x86_64/  "${customIsoTmpDir}/lorax/anaconda_iso/"
+	mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}/lorax/src/" "${customIsoTmpDir}/lorax/src/sbin/lorax" -p Fedora -v "${customIsoReleaseVer}" -r "${customIsoReleaseVer}" -s https://dl.fedoraproject.org/pub/fedora/linux/releases/"${customIsoReleaseVer}"/Everything/x86_64/os/ -s https://dl.fedoraproject.org/pub/fedora/linux/updates/"${customIsoReleaseVer}"/Everything/x86_64/ --sharedir "${customIsoTmpDir}/lorax/share/templates.d/99-generic/" "${customIsoTmpDir}/lorax/anaconda_iso/"
     
     umount "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}"
 }
