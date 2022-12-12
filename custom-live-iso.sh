@@ -85,12 +85,14 @@ customIso_getOrigIso () {
     		if [[ "${origIsoSource}" == 'SELECT LOCAL ISO (NO DOWNLOAD)' ]]; then
     			if [[ -n $(find "${customIsoTmpDir}" -type f -iname '*.iso') ]]; then
     				PS3="Please choose local iso file (found under ${customIsoTmpDir}) to use: "
-    				select origIsoSource in $(find "${customIsoTmpDir}" -type f -iname '*.iso' | sed -E s/'^'/'file:\/\/'/)
+    				select origIsoSource in 'GO BACK TO PREVIOUS MENU' $(find "${customIsoTmpDir}" -type f -iname '*.iso' | sed -E s/'^'/'file:\/\/'/)
     				do
-    				       	break 
+    				       	(( REPLY == 1 )) && origIsoSource=''
+							break 
     				done
     			else
     				echo -e "NO ISO FILES FOUND UNDER ${customIsoTmpDir}! \nPlease add one here or select one of a respin to download" >&2
+					origIsoSource=''
     			fi
     
     		else	
