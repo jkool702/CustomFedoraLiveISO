@@ -77,8 +77,8 @@ customIso_getOrigIso () {
     cd "${customIsoTmpDir}" 
     
     # select and download respin if `origIsoSource` not given
-    PS3='please select fedora-live respin ISO image to download and customize: '
-    if [[ -z ${origIsoSource} ]]; then
+    until [[ -n ${origIsoSource} ]]; do
+    	PS3='please select fedora-live respin ISO image to download and customize: '
     	select origIsoSource in $(wget --spider https://dl.fedoraproject.org/pub/alt/live-respins/ -r -l 1 2>&1 | grep -F 'https://dl.fedoraproject.org/pub/alt/live-respins' | sed -E s/'^.*\/'// | grep -E '^F') 'SELECT LOCAL ISO (NO DOWNLOAD)'
     	do
     		echo "YOU CHOSE ${origIsoSource}"
@@ -88,7 +88,7 @@ customIso_getOrigIso () {
     				select origIsoSource in 'GO BACK TO PREVIOUS MENU' $(find "${customIsoTmpDir}" -type f -iname '*.iso' | sed -E s/'^'/'file:\/\/'/)
     				do
     				       	(( REPLY == 1 )) && origIsoSource=''
-							break 
+					break 
     				done
     			else
     				echo -e "NO ISO FILES FOUND UNDER ${customIsoTmpDir}! \nPlease add one here or select one of a respin to download" >&2
@@ -98,9 +98,11 @@ customIso_getOrigIso () {
     		else	
     			origIsoSource="https://dl.fedoraproject.org/pub/alt/live-respins/${origIsoSource}" 
     		fi
-    		[[ -n "${origIsoSource}" ]] && echo "The live ISO image will be sourced from ${origIsoSource}" && break
+		break
     	done
-    fi
+    done
+    
+    echo "The live ISO image will be sourced from ${origIsoSource}" 
     
     # get fedora image from internet (using wget) or link from file
     origIsoFileName="${origIsoSource##*/}"
