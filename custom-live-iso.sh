@@ -151,7 +151,7 @@ customIso_prepRootfs() {
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable NetworkManager-wait-online.service
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'newusers <(echo "liveuser::1000:1000:liveuser:/home/liveuser:/usr/bin/bash"); passwd -u liveuser; passwd -x "-1" liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service;  systemctl disable NetworkManager-wait-online.service'
+    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'cat /etc/passwd | grep -qE ^liveuser && useredel liveuser; cat /etc/group | grep -qE ^liveuser && groupdel liveuser; useradd -e "-1" -f "-1" -G wheel -s /usr/bin/bash -p "" -u 1000 -m -U liveuser; passwd -d -f liveuser; passwd -u -f liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
     systemctl is-enabled systemd-networkd || systemctl enable systemd-networkd --now
     
     # add in repos from host system
@@ -160,7 +160,6 @@ customIso_prepRootfs() {
     
     # if the host kernel is different than the live ISO rootfs's kernel, temporairly make a symlink in the live OS rootfs's /lib/modules directory that goes from host kernel name --> live ISO rootfs kernel name
     [[ "$(find "${customIsoRootfsMountPoint}/lib/modules" -maxdepth 1 -mindepth 1 -type d | sort -uV | tail -n 1)" == "${customIsoRootfsMountPoint}/lib/modules/$(uname -r)" ]] && setupLibModulesSymlinkFlag=false || setupLibModulesSymlinkFlag=true
-
 }
 
 customIso_prepRootfs   
@@ -245,7 +244,6 @@ customIso_nspawnRootfs() {
 			dnf --installroot="${customIsoRootfsMountPoint}" --releasever "${customIsoReleaseVer}" remove 'kernel*'"${nn}"
 		done
 	fi
-
 }
 
 customIso_nspawnRootfs
@@ -278,7 +276,7 @@ getIsoDracutModules() {
 
 customIso_setupDracutConf() {
     # if the host kernel is different than the live ISO rootfs's kernel, temporairly make a symlink in the live OS rootfs's /lib/modules directory that goes from host kernel name --> live ISO rootfs kernel name
-      if ${setupLibModulesSymlinkFlag}; then
+    if ${setupLibModulesSymlinkFlag}; then
     	curPWD="$(pwd)"
     	cd "${customIsoRootfsMountPoint}/lib/modules"
     	ln -s "$(find ./ -maxdepth 1 -mindepth 1 -type d | sort -V | tail -n 1 | sed -E s/'^\.\/'//)" "$(uname -r)"
@@ -312,8 +310,7 @@ EOF
     ${setupLibModulesSymlinkFlag} && rm -f "${customIsoRootfsMountPoint}/lib/modules/$(uname -r)"    
     
     # make sure that user 'liveuser' is still valid  and active and passwordless, and that network-wait-online services are still disabled.
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'newusers <(echo "liveuser::1000:1000:liveuser:/home/liveuser:/usr/bin/bash"); passwd -u liveuser; passwd -x "-1" liveuser; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
-
+    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'usermod -a -G wheel liveuser; usermod -e "-1" -f "-1" -s /usr/bin/bash -p "" liveuser; passwd -d -f liveuser; passwd -u -f liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
     
     # umount modified image
     umount -R "${customIsoRootfsMountPoint}"
