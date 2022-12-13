@@ -146,11 +146,12 @@ customIso_prepRootfs() {
     [[ -z ${customIsoLabelShort} ]] && customIsoLabelShort="F${customIsoReleaseVer}-LIVE-CUSTOM"
     
     # add 'liveuser' user without password. Login as liveuser, then run `sudo su` to become root
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" adduser -U -G wheel liveuser
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" passwd -u -f liveuser
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable NetworkManager-wait-online.service
+    #systemd-nspawn -D "${customIsoRootfsMountPoint}" adduser -U -G wheel liveuser
+    #systemd-nspawn -D "${customIsoRootfsMountPoint}" passwd -u -f liveuser
+    #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
+    #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
+    #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable NetworkManager-wait-online.service
+    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'newusers <(echo "liveuser::1000:1000:liveuser:/home/liveuser:/usr/bin/bash"); passwd -x "-1" -u liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service;  systemctl disable NetworkManager-wait-online.service'
     systemctl is-enabled systemd-networkd || systemctl enable systemd-networkd --now
     
     # add in repos from host system
