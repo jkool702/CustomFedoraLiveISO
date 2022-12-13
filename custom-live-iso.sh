@@ -151,7 +151,7 @@ customIso_prepRootfs() {
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable NetworkManager-wait-online.service
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'newusers <(echo "liveuser::1000:1000:liveuser:/home/liveuser:/usr/bin/bash"); passwd -x "-1" -u liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service;  systemctl disable NetworkManager-wait-online.service'
+    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'newusers <(echo "liveuser::1000:1000:liveuser:/home/liveuser:/usr/bin/bash"); passwd -u liveuser; passwd -x "-1" liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service;  systemctl disable NetworkManager-wait-online.service'
     systemctl is-enabled systemd-networkd || systemctl enable systemd-networkd --now
     
     # add in repos from host system
