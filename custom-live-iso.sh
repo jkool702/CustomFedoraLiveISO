@@ -310,13 +310,18 @@ EOF
     
     # remove temp /lib/modules symlink in live ISO rootfs (if we made this earlier)
     ${setupLibModulesSymlinkFlag} && rm -f "${customIsoRootfsMountPoint}/lib/modules/$(uname -r)"    
+    
+    # make sure that user 'liveuser' is still valid  and active and passwordless, and that network-wait-online services are still disabled.
+    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'newusers <(echo "liveuser::1000:1000:liveuser:/home/liveuser:/usr/bin/bash"); passwd -u liveuser; passwd -x "-1" liveuser; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
+
+    
+    # umount modified image
+    umount -R "${customIsoRootfsMountPoint}"
 }
 
 customIso_setupDracutConf
 
 customIso_getLorax() {
-    # umount modified image
-    umount -R "${customIsoRootfsMountPoint}"
     
     # clone lorax git repo
     [[ -d "${customIsoTmpDir}"/lorax ]] && rm -rf "${customIsoTmpDir}"/lorax 
