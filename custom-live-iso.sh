@@ -153,7 +153,7 @@ customIso_prepRootfs() {
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable NetworkManager-wait-online.service
-    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'cat /etc/passwd | grep -qE ^liveuser && useredel liveuser; cat /etc/group | grep -qE ^liveuser && groupdel liveuser; useradd -e "-1" -f "-1" -G wheel -s /usr/bin/bash -p "" -u 1000 -m -U liveuser; passwd -d -f liveuser; passwd -u -f liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
+    systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'cat /etc/passwd | grep -qE ^liveuser && userdel liveuser; cat /etc/group | grep -qE ^liveuser && groupdel liveuser; useradd -e "-1" -f "-1" -G wheel -s /usr/bin/bash -p "" -u 1000 -m -U liveuser; passwd -d -f liveuser; passwd -u -f liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
     systemctl is-enabled systemd-networkd || systemctl enable systemd-networkd --now
     
     # add in repos from host system
