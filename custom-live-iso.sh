@@ -104,7 +104,7 @@ customIso_getOrigIso () {
         done
     done
     
-    echo "The live ISO image will be sourced from ${origIsoSource}" 
+    echo "The live ISO image will be sourced from ${origIsoSource}" >&2
     
     # get fedora image from internet (using wget) or link from file
     origIsoFileName="${origIsoSource##*/}"
