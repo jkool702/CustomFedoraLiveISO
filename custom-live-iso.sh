@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/usr/bin/bash -x
 
 #https://github.com/jkool702/CustomFedoraLiveISO/blob/main/custom-live-iso.sh
 
@@ -21,10 +21,7 @@ useNvidiaFlag=true                               # true/false. this adds stuff t
 #origIsoSource='https://dl.fedoraproject.org/pub/alt/live-respins/F37-KDE-x86_64-LIVE-20221201.iso'
 #origIsoSource='file:///home/${USER}/F37-KDE-x86_64-LIVE-20221201.iso'
 
-# # # # # # # # # # # # # # BEGIN SCRIPT # # # # # # # # # # # # # # # # # 
-
-# set selinux to permissive
-setenforce 0
+# # # # # # # # # # # # # # DEFINE SOME HELPER FUNCTIONS # # # # # # # # # # # # # # # # # 
 
 dirAutoRename() {
     # if the input directory exists, rename it to ${ORIGNAME}_N, where N is the lowest non-negative integer such that ${ORIGNAME}_N doesnt exist
@@ -41,18 +38,115 @@ dirAutoRename() {
     done
 }
 
-# set trap for cleanup
+verifyIsoChecksum() {
+    # verifies the sha256 or sha512 hash of the original "base" ISO image file against a known valid file hash
+    #
+    # USAGE: `isoVerifiedFlag=$(verifyIsoChecksum [file://]${origIsoFilePath})` 
+    # 
+    # the ISO image file's valid SHA256 or SHA512 has must be in a file at ${origIsoFilePath}.checksum. This file must contain a line consisting of either:
+    #      "$fileHash $fileName" or "$fileName $fileHash"
+    #
+    # NOTE:  if 'file://' is included, it indicates the ISO was sourced locally and not downloaded from the internet
+    #        should the valid checksum file be missing or not match the file's actual checksum, this changes the warning message texts accordingly, but otherwise has no effect
+    #
+    # There are 5 possible function output scenarios
+    #     echo {true, false} controls if the script continues or aborts/redownloads the iso
+    #     return {0, 1, 2, 3} given info on if the hash matched / didnt match or if the valid hash file couldnt be parsed / wasnt found at ${origIsoFilePath}.checksum
+    #
+    #     Hashes match                               --> echo true; return 0
+    #     Hashes dont match:
+    #         User selects continue                  --> echo true; return 1
+    #         User chooses to abort/redownload       --> echo false; return 1
+    #     Valid hash file exists but cant be parsed  --> echo true; return 2
+    #     Valid hash file not found                  --> echo true; return 3
+    #
+    # NOTE: A missing / unparsable valid hash file will only print a warning to screen. It wont cause the script to stop or to automatically re-download, 
+    #       since this could easily result in an infinite download loop if there isn't a valid hash file available in a format this script understands.
+
+    local origIsoFilePath
+    local isoValidChecksum
+    local isoActualChecksum
+    local isoVerifiedFlag
+    local localFlag
+
+    echo "${1}" | grep -q -E '^file:\/\/' && localFlag=true || localFlag=false
+    origIsoFilePath="${1#file://}"
+
+    if ! [[ -f "${origIsoFilePath}.checksum" ]]; then
+        ${localFlag} && echo -e "\nNOTICE: the selected ISO file will not have its checksum verified. \nTo automatically verify the checksum. place a file containing \n\tthe file name and \n\tthe file's SHA256 or SHA512 hash \n\t(both on the same line. seperated by <space>) \nat ${origIsoFilePath}.checksum" >&2 || echo -e "\n\nWARNING: the downloaded ISO image will not have its checksum automatically verified. \n\nAutomatic checksum verification is only available if the online source directory containing the ISO image includes a file named '*CHECKSUM*' (case-insensitive)\nThis *should* be the case for any ISO images downloaded from: https://dl.fedoraproject.org/pub/*, meaning that this ISO image is not coming directly from Fedora. \n\nNOTE: this does not mean that the image is corrupt, just that it will not have its checksum verified to guarantee no corruption.\n\n" >&2 
+        sleep 2 && echo 'true' && return 3
+    fi
+
+    isoValidChecksum="$(grep -F "${origIsoFilePath##*/}" "${origIsoFilePath}.checksum" | grep -v -E '^#' | sed -E s/'(^|.* )(([0-9a-f]{64})|([0-9a-f]{128}))($| .*)'/'\2'/ | tr -d ' ' | tr -d '\t' | tr -d '\r')"
+
+    if [[ -z ${isoValidChecksum} ]]; then
+        echo "WARNING: checksum verification file found but is in an unknown/unsupported format -- could not extract valid checksum from it. ISO image checksum verification will be skipped" >&2 
+        sleep 2 && echo 'true' && return 2
+    else
+        isoActualChecksum="$("sha$((( $(echo -n "${isoValidChecksum}" | wc -c) * 4 )))sum" "${origIsoFilePath}" | awk '{print $1}' | tr -d ' ' | tr -d '\t' | tr -d '\r')"
+        if [[ "${isoValidChecksum,,}" == "${isoActualChecksum,,}" ]]; then
+            echo "SUCCESS! ISO checksum verified!" >&2
+            sleep 2 && echo 'true' && return 0 
+        else
+            echo "WARNING: the downloaded ISO vailed image checksum verification!" >&2
+            PS3='Do you want to CONTINUE and use the (probably corrupted) ISO or '"$(${localFlag} && echo 'ABORT' || echo 'RE-DOWNLOAD it')"'?'
+            select userResponse in 'CONTINUE and use the (probably corrupted) ISO' "$(${localFlag} && echo 'ABORT and manually examine/fix the ISO and then re-run this script when ready' || echo 'RE-DOWNLOAD the original base ISO from '"${origIsoSource}"' (note: current downloaded iso and checksum files will be deleted)')"; do
+                echo "You chose: ${userResponse}" >&2
+                (( ${REPLY} == 1 )) && { echo 'true' && return 1; }
+                (( ${REPLY} == 2 )) && { echo 'false' && return 1; }
+                break
+            done
+        fi
+    fi
+}
+
+getIsoDracutModules() {
+    # this helper function querier the dracut modules that dracut in the customized rootfs image knows about, then goes 1-by-1 and checks if the required binaries exist on the rootfs.img system not.
+    # this is needed to ensure that livemedia-creator doesnt use a dracut module that it doesnt have the required binaries for, which would cause ISO generation to fail.
+    local -a reqAll
+    local -a reqAny
+    local reqMetFlag
+    local dracutMod
+    local nn
+    local -a customIsoDracutModules
+    local customIsoRootfsMountPoint
+
+    customIsoRootfsMountPoint="${1}"
+
+    echo -e "\n\nDetermining which dracut modules the custom ISO is capable of running \n(for each dracut module this checks that all required binaries are present on the system)\n\n" >&2
+
+    mapfile -t customIsoDracutModules < <(find "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/ -mindepth 1 -maxdepth 1 -type d | sed -E s/'^.*\/usr\/lib\/dracut\/modules.d\/'// | sed -E s/'^[0-9]{2}'//)
+
+    for dracutMod in "${customIsoDracutModules[@]}"; do 
+        unset reqAll; unset reqAny; unset reqMetFlag;
+        mapfile -t reqAll < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/*"${dracutMod}"/*.sh | grep -F 'require_binaries' | sed -E s/'^.*require_binaries '// | sed -E s/.'((\|\|)|(\;)|(\\)).*$'// | sed -zE s/'[ \t]+'/'\n'/g); 
+        mapfile -t reqAny < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/*"${dracutMod}"/*.sh | grep -F 'require_any_binary' |sed -E s/'^.*require_any_binary '// | sed -E s/.'((\|\|)|(\;)|(\\)).*$'// | sed -zE s/'[ \t]+'/'\n'/g);
+
+        reqMetFlag=false
+        (( ${#reqAny[@]} == 0 )) && reqMetFlag=true || for nn in "${reqAny[@]##*/}"; do (( $(find "${customIsoRootfsMountPoint}"/usr -type f ! -empty -perm -u+x -perm -g+x -perm -o+x -name "${nn}" | wc -l) > 0 )) && reqMetFlag=true; done
+        ${reqMetFlag} && (( ${#reqAll[@]} > 0 )) && for nn in "${reqAll[@]##*/}"; do (( $(find "${customIsoRootfsMountPoint}"/usr -type f ! -empty -perm -u+x -perm -g+x -perm -o+x -name "${nn}" | wc -l) == 0 )) && reqMetFlag=false; done
+        ${reqMetFlag} && echo "${dracutMod}"
+    done
+}
+
+# set umount functioin for trap for cleanup
 cleanup_umount() {
     local nn
-    mapfile -t umountPaths < <(cat /proc/mounts | awk '{print $2}' | grep -F -f <(printf '%s\n' "${customIsoRootfsMountPoint}" "${customIsoTmpDir}"))
+    mapfile -t umountPaths < <(awk '{print $2}' < /proc/mounts  | grep -F -f <(printf '%s\n' "${customIsoRootfsMountPoint}" "${customIsoTmpDir}"))
     for nn in "${umountPaths[@]}"; do
         umount -R "${nn}"
         grep -q -F "$nn" /proc/mounts && umount -R -f "${nn}" && grep -q -F "$nn" /proc/mounts && umount -R -f -l "${nn}"
     done
     exit
 }
-trap cleanup_umount EXIT INT TERM ABRT
 
+# # # # # # # # # # # # # # BEGIN SCRIPT # # # # # # # # # # # # # # # # # 
+
+# set selinux to permissive
+setenforce 0
+
+# set trap for cleanup
+trap cleanup_umount EXIT ERR INT TERM ABRT
 
 customIso_init() {
     # check inputs and set defaults
@@ -64,7 +158,7 @@ customIso_init() {
     { [[ -n ${rootfsSizeGB} ]] && echo "${rootfsSizeGB}" | grep -q -E '%[0-9]*[1-9]+[0-9]*$'; } || rootfsSizeGB=16
     
     # Install dependencies. Note: this probably isnt a complete list of all required dependencies. Let me know of any Ive missed and Ill add them.
-    sudo dnf install git 'livecd*' 'lorax*' systemd-container lshw wget isomd5sum '*kickstart*' qemu qemu-kvm syslinux systemd-container dracut-live isomd5sum mock
+    sudo dnf --skip-broken install git 'livecd*' 'lorax*' systemd-container lshw wget isomd5sum '*kickstart*' qemu qemu-kvm syslinux systemd-container dracut-live isomd5sum mock coreutils
     
     # make directories
     mkdir -p "${customIsoTmpDir}"/mnt/iso_old
@@ -81,15 +175,15 @@ customIso_getOrigIso () {
     # select and download respin if `origIsoSource` not given
     until [[ -n ${origIsoSource} ]]; do
         PS3='please select fedora-live respin ISO image to download and customize: '
-        select origIsoSource in $(wget --spider https://dl.fedoraproject.org/pub/alt/live-respins/ -r -l 1 2>&1 | grep -F 'https://dl.fedoraproject.org/pub/alt/live-respins' | sed -E s/'^.*\/'// | grep -E '^F') 'SELECT LOCAL ISO (NO DOWNLOAD)'
+        select origIsoSource in $(wget --spider -r -l 1 --no-parent 'https://dl.fedoraproject.org/pub/alt/live-respins/' 2>&1 | grep -F 'https://dl.fedoraproject.org/pub/alt/live-respins' | sed -E s/'^.*\/'// | grep -E '^F') 'SELECT LOCAL ISO (NO DOWNLOAD)'
         do
-            echo "YOU CHOSE ${origIsoSource}"
+            echo "You Chose: ${origIsoSource}"
             if [[ "${origIsoSource}" == 'SELECT LOCAL ISO (NO DOWNLOAD)' ]]; then
                 if [[ -n $(find "${customIsoTmpDir}" -type f -iname '*.iso') ]]; then
                     PS3="Please choose local iso file (found under ${customIsoTmpDir}) to use: "
                     select origIsoSource in 'GO BACK TO PREVIOUS MENU' $(find "${customIsoTmpDir}" -type f -iname '*.iso' | sed -E s/'^'/'file:\/\/'/)
                     do
-                               (( REPLY == 1 )) && origIsoSource=''
+                        (( REPLY == 1 )) && origIsoSource=''
                     break 
                     done
                 else
@@ -107,14 +201,33 @@ customIso_getOrigIso () {
     echo "The live ISO image will be sourced from ${origIsoSource}" >&2
     
     # get fedora image from internet (using wget) or link from file
+    # attempt to automatically verify the image checksum
     origIsoFileName="${origIsoSource##*/}"
+    [[ -n ${origIsoFileName} ]] || { echo "ERROR: invalid original ISO source specified. Aborting." >&2 && exit 1; }
+    [[ -z ${customIsoFsLabel} ]] && customIsoFsLabel="${origIsoFileName%.iso}-CUSTOM"
+    isoVerifiedFlag=false
+
     if echo "${origIsoSource}" | grep -qE '^file:\/\/'; then
         origIsoFilePath="${origIsoSource#file:\/\/}"
-    else
-        wget "${origIsoSource}"
+
+        isoVerifiedFlag=$(verifyIsoChecksum "${origIsoSource}")
+
+        ${isoVerifiedFlag} || exit 1
+
+    else  
         origIsoFilePath="${customIsoTmpDir}/${origIsoFileName}"
-    fi
-    [[ -z ${customIsoFsLabel} ]] && customIsoFsLabel="${origIsoFileName%.iso}-CUSTOM"
+        
+        until ${isoVerifiedFlag}; do
+            echo "Now Downloading ISO image and (if available) checksums from ${origIsoSource}" >&2
+            wget --output-document="${origIsoFilePath}" "${origIsoSource}"
+            
+            mapfile -t availIsoChecksums < <(wget --spider -r -l 1 --no-parent "${origIsoSource%/*}" 2>&1 | grep -F "${origIsoSource%/*}" | awk '{print $3}' | grep -i checksum | sort -u)
+            (( ${#availIsoChecksums[@]} > 0 )) && wget --output-document="${origIsoFilePath}.checksum" "${availIsoChecksums[@]}"
+            
+            isoVerifiedFlag=$(verifyIsoChecksum "${origIsoFilePath}")
+            ${isoVerifiedFlag} || rm -f "${origIsoFilePath}" "${origIsoFilePath}.checksum"
+        done   
+    fi      
 }
 
 customIso_getOrigIso   
@@ -194,7 +307,7 @@ customIso_nspawnRootfs() {
         PS3='Select the networking options to use with systemd-nspawn: '
         select nspawnCmd in "systemd-nspawn -b -D ${customIsoRootfsMountPoint}" "systemd-nspawn -n -b -D ${customIsoRootfsMountPoint}" "systemd-nspawn --network-interface=<...> -b -D ${customIsoRootfsMountPoint}"
         do
-            echo "You chose ${nspawnCmd}" >&2
+            echo "You Chose: ${nspawnCmd}" >&2
             case $REPLY in
                 
                 1)
@@ -210,7 +323,7 @@ customIso_nspawnRootfs() {
                     PS3='Select which network interface to pass to systemd-nspawn: '
                     select nspawnIface in $(ifconfig | grep -E '^[^ \t\n]' | awk -F ':' '{print $1}')
                     do
-                        echo "You chose ${nspawnIface}" >&2
+                        echo "You Chose: ${nspawnIface}" >&2
                         break
                     done
                     systemd-nspawn --network-interface="${nspawnIface}" -b -D "${customIsoRootfsMountPoint}"
@@ -223,7 +336,7 @@ customIso_nspawnRootfs() {
             PS3='SELECT WHETHER TO CONTINUE OR RE-RUN SYSTEMD-NSPAWN: '
             select nspawnDoneStr in 'IM NOT DONE CUSTOMIZING -- RE-RUN SYSTEMD-NSPAWN' 'IM DONE CUSTOMIZING -- CONTINUE AND GENERATE THE ISO'
             do    
-                echo "You chose ${nspawnDoneStr}" >&2
+                echo "You Chose: ${nspawnDoneStr}" >&2
                 (( $REPLY == 2 )) && nspawnDoneFlag=true
                 break
             done
@@ -242,39 +355,13 @@ customIso_nspawnRootfs() {
         echo -e '\n\nDETECTED MULTIPLE KERNELS INSTALLED IN THE CUSTOM ISO ROOTFS! \nBelow you will be asked to uninstall all but the newest kernel from the live iso rootfs. \n(a live image having multiple kernels is pretty pointless and perhaps problematic)\n\n' >&2
         sleep 2
         dnf --installroot="${customIsoRootfsMountPoint}" --releasever "${customIsoReleaseVer}" update 'kernel*'
-        for nn in ${customIsoKernels[@]:1}; do
+        for nn in "${customIsoKernels[@]:1}"; do
             dnf --installroot="${customIsoRootfsMountPoint}" --releasever "${customIsoReleaseVer}" remove 'kernel*'"${nn}"
         done
     fi
 }
 
 customIso_nspawnRootfs
-
-getIsoDracutModules() {
-    # this helper function querier the dracut modules that dracut in the customized rootfs image knows about, then goes 1-by-1 and checks if the required binaries exist on the rootfs.img system not.
-    # this is needed to ensure that livemedia-creator doesnt use a dracut module that it doesnt have the required binaries for, which would cause ISO generation to fail.
-    local -a reqAll
-    local -a reqAny
-    local reqMetFlag
-    local dracutMod
-    local nn
-    local -a customIsoDracutModules
-
-    echo -e "\n\nDetermining which dracut modules the custom ISO is capable of running \n(for each dracut module this checks that all required binaries are present on the system)\n\n" >&2
-
-    mapfile -t customIsoDracutModules < <(ls -1 "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/ | sed -E s/'^[0-9]{2}'//)
-
-    for dracutMod in "${customIsoDracutModules[@]}"; do 
-        unset reqAll; unset reqAny; unset reqMetFlag;
-        mapfile -t reqAll < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/*${dracutMod}/*.sh | grep -F 'require_binaries' | sed -E s/'^.*require_binaries '// | sed -E s/.'((\|\|)|(\;)|(\\)).*$'// | sed -zE s/'[ \t]+'/'\n'/g); 
-        mapfile -t reqAny < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/*${dracutMod}/*.sh | grep -F 'require_any_binary' |sed -E s/'^.*require_any_binary '// | sed -E s/.'((\|\|)|(\;)|(\\)).*$'// | sed -zE s/'[ \t]+'/'\n'/g);
-
-        reqMetFlag=false
-        (( ${#reqAny[@]} == 0 )) && reqMetFlag=true || for nn in "${reqAny[@]##*/}"; do (( $(find "${customIsoRootfsMountPoint}"/usr -type f ! -empty -perm -u+x -perm -g+x -perm -o+x -name "${nn}" | wc -l) > 0 )) && reqMetFlag=true; done
-        ${reqMetFlag} && (( ${#reqAll[@]} > 0 )) && for nn in "${reqAll[@]##*/}"; do (( $(find "${customIsoRootfsMountPoint}"/usr -type f ! -empty -perm -u+x -perm -g+x -perm -o+x -name "${nn}" | wc -l) == 0 )) && reqMetFlag=false; done
-        ${reqMetFlag} && echo "${dracutMod}"
-    done
-}
 
 customIso_setupDracutConf() {
     # if the host kernel is different than the live ISO rootfs's kernel, temporairly make a symlink in the live OS rootfs's /lib/modules directory that goes from host kernel name --> live ISO rootfs kernel name
@@ -290,7 +377,7 @@ customIso_setupDracutConf() {
     declare -a dracutAddModules=( bash systemd systemd-ask-password systemd-coredump systemd-initrd systemd-journald systemd-ldconfig systemd-modules-load systemd-rfkill systemd-sysctl systemd-sysext systemd-sysusers systemd-tmpfiles systemd-udevd systemd-veritysetup dbus drm crypt dm dmsquash-live dmsquash-live-ntfs dmsquash-live-autooverlay kernel-modules kernel-modules-extra kernel-network-modules livenet multipath crypt-gpg tpm2-tss iscsi lunmask resume rootfs-block terminfo udev-rules dracut-systemd pollcdrom base fs-lib img-lib shutdown squash uefi-lib convertfs qemu qemu-net biosdevname convertfs rngd terminfo modsign )
     
     # filter down to dracut modules we can actually use
-    mapfile -t dracutAddModules < <(printf '%s\n' "${dracutAddModules[@]}" | sort -u | grep -E -f <(printf '^%s$\n' "$(getIsoDracutModules)"))
+    mapfile -t dracutAddModules < <(printf '%s\n' "${dracutAddModules[@]}" | sort -u | grep -E -f <(printf '^%s$\n' "$(getIsoDracutModules "${customIsoRootfsMountPoint}")"))
     
     # add dracut.conf to rootfs.img
     cat > "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut.conf <<EOF
@@ -348,7 +435,7 @@ customIso_mockBuildAnacondaBootIso() {
     # setup mock
     mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --init
     mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- dnf install 'anaconda*' 'lorax*'
-    mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- mkdir -p  "${customIsoTmpDir}"
+    mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- mkdir -p "${customIsoTmpDir}"
     mkdir -p "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}"
     
     # bind-mount $customIsoTmpDir into mock
@@ -368,7 +455,7 @@ customIso_generateLiveIso() {
     dirAutoRename "${customIsoTmpDir}/ISO"
     
     # run livemedia-creator to generate new ISO
-    PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}"/lorax/src/ "${customIsoTmpDir}"/lorax/src/sbin/livemedia-creator --make-iso --ks="${customIsoTmpDir}/lorax/docs/fedora-livemedia.ks.flat" --fs-image="${customIsoRootfsPath}" --fs-label="${customIsoFsLabel}" --iso-only --iso-name "${customIsoFsLabel}.iso" --iso "${customIsoTmpDir}/lorax/anaconda_iso/images/boot.iso" --lorax-templates="${customIsoTmpDir}/lorax/share/" --resultdir "${customIsoTmpDir}/ISO" --releasever "${customIsoReleaseVer}" --nomacboot --dracut-conf /etc/dracut.conf.d/dracut.conf --extra-boot-args "rd.live.image rd.live.check rd.live.dir=/LiveOS rd.live.squashimg=squashfs.img rd.auto=1 gpt zswap.enabled=1 zswap.compressor=lzo-rle transparent_hugepages=madvise panic=60  mitigations=auto spec_store_bypass_disable=auto noibrs noibpb spectre_v2=auto spectre_v2_user=auto pti=auto retbleed=auto tsx=auto rd.timeout=60 systemd.show_status rd.info rd.udev.info rd.shell selinux=0 $(${useNvidiaFlag} && echo "rd.driver.blacklist=nouveau rd.modprobe.blacklist=nouveau rd.driver.pre=nvidia rd.driver.pre=nvidia_uvm rd.driver.pre=nvidia_drm rd.driver.pre=drm rd.driver.pre=nvidia_modeset driver.blacklist=nouveau modprobe.blacklist=nouveau driver.pre=nvidia driver.pre=nvidia_uvm driver.pre=nvidia_drm driver.pre=drm driver.pre=nvidia_modeset nvidia-drm.modeset=1" || echo -n '')" 
+    PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}"/lorax/src/ "${customIsoTmpDir}"/lorax/src/sbin/livemedia-creator --make-iso --ks="${customIsoTmpDir}/lorax/docs/fedora-livemedia.ks.flat" --fs-image="${customIsoRootfsPath}" --fs-label="${customIsoFsLabel}" --iso-only --iso-name "${customIsoFsLabel}.iso" --iso "${customIsoTmpDir}/lorax/anaconda_iso/images/boot.iso" --lorax-templates="${customIsoTmpDir}/lorax/share/" --resultdir "${customIsoTmpDir}/ISO" --releasever "${customIsoReleaseVer}" --nomacboot --dracut-conf /etc/dracut.conf.d/dracut.conf --extra-boot-args "rd.live.image rd.live.check rd.live.dir=/LiveOS rd.live.squashimg=squashfs.img rd.auto=1 gpt zswap.enabled=1 zswap.compressor=lzo-rle transparent_hugepages=madvise panic=60  mitigations=auto spec_store_bypass_disable=auto noibrs noibpb spectre_v2=auto spectre_v2_user=auto pti=auto retbleed=auto tsx=auto rd.timeout=60 systemd.show_status rd.info rd.udev.log-priority=info rd.shell selinux=0 $(${useNvidiaFlag} && echo "rd.driver.blacklist=nouveau rd.modprobe.blacklist=nouveau rd.driver.pre=nvidia rd.driver.pre=nvidia_uvm rd.driver.pre=nvidia_drm rd.driver.pre=drm rd.driver.pre=nvidia_modeset driver.blacklist=nouveau modprobe.blacklist=nouveau driver.pre=nvidia driver.pre=nvidia_uvm driver.pre=nvidia_drm driver.pre=drm driver.pre=nvidia_modeset nvidia-drm.modeset=1" || echo -n '')" 
 }
 
 customIso_generateLiveIso
