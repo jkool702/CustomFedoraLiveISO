@@ -415,12 +415,12 @@ omit_dracutmodules+=" zfs plymouth "
 add_dracutmodules+=" ${dracutAddModules[@]} "
 hostonly=no
 persistent_policy=by-id
-install_optional_items+=" /sbin/sysctl /sbin/sysctl "
+install_optional_items+=" /sbin/sysctl /sbin/sysctl /bin/ntfs-3g /bin/ntfs-3g "
 mdadmconf=no
 lvmconf=no
 hostonly_cmdline=yes
 show_modules=yes
-$(${useNvidiaFlag} && echo 'add_drivers+=" nvidia-drm nvidia nvidia-modeset nvidia-peermem nvidia-uvm "' || echo -n '')
+$(${useNvidiaFlag} && echo 'add_drivers+=" nvidia-drm nvidia nvidia-modeset nvidia-peermem nvidia-uvm ntfs3 "' || echo 'add_drivers+=" ntfs3 "')
 EOF
 
     # copy to host system
