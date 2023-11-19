@@ -19,7 +19,7 @@
 # if left blank, you will be promoted to choose one of the current fedora "respins" to download OR to choose a local ISO found somewhere under $customIsoTmpDir
 #origIsoSource='https://download.fedoraproject.org/pub/fedora/linux/releases/test/39_Beta/Spins/x86_64/iso/Fedora-KDE-Live-x86_64-39_Beta-1.1.iso'
 #origIsoSource='https://dl.fedoraproject.org/pub/alt/live-respins/F37-KDE-x86_64-LIVE-20221201.iso'
-#origIsoSource='file:///home/anthony/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
+#origIsoSource='file:///${HOME}/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
 
 # # # # # # # # # # # # # # DEFINE SOME HELPER FUNCTIONS # # # # # # # # # # # # # # # # # 
 
