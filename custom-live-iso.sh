@@ -19,7 +19,7 @@
 # if left blank, you will be promoted to choose one of the current fedora "respins" to download OR to choose a local ISO found somewhere under $customIsoTmpDir
 #origIsoSource='https://download.fedoraproject.org/pub/fedora/linux/releases/test/39_Beta/Spins/x86_64/iso/Fedora-KDE-Live-x86_64-39_Beta-1.1.iso'
 #origIsoSource='https://dl.fedoraproject.org/pub/alt/live-respins/F37-KDE-x86_64-LIVE-20221201.iso'
-origIsoSource='file://'"$(realpath /home/*/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso)"
+#origIsoSource='file:///home/anthony/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
 
 # # # # # # # # # # # # # # DEFINE SOME HELPER FUNCTIONS # # # # # # # # # # # # # # # # # 
 
@@ -153,7 +153,21 @@ setenforce 0
 
 # set trap for cleanup
 trap cleanup_umount EXIT HUP TERM QUIT ABRT
-trap 'printf "%s\n" "press a to abort" "press u to unset INT trap" "press e to execute a command" "press v to write vars to file" "press anything else to continue" >&2; read -r; case "$REPLY" in a) exit ;; u) trap - INT ;; e) source <(read -r && echo "$REPLY");; v) declare -p > '"${customIsoTmpDir}/vars"' ;; esac' INT
+trap 'printf "%s\n" "" "press [a] to Abort (exit)" "press [u] to Unset INT trap (makes <ctrl> + <c> work normally again)" "press [x] to eXecute a command" "press [p] to print the Present working directory" "press [i] to print Information about what caller/function/line/command is currently running" "press [d] / [D] to start (set -xv) / stop (set +xv) printing Debug output to stderr" "press [v] / [V] to write Vars (declare -p) to [stdout] / to [file (${PWD}/.vars)]" "press [e] / [E] to write Environment (env) to [stdout] / to [file (${PWD}/.env)]" "press anything else to continue" >&2; 
+read -r -n 1; 
+case "$REPLY" in 
+    a) exit ;; 
+    u) trap - INT ;; 
+    x) if [[ $USER == root ]] && [[ ${SUDO_USER} ]] && ! [[ ${SUDO_USER} == root ]] && type -a su &>/dev/null; then su -p "${SUDO_USER}" < <(read -r && echo "$REPLY"); elif ! [[ $USER == root ]]; then source <(read -r && echo "$REPLY"); else echo "for security running generic commands as root is not allowed" >&2; fi ;; 
+    p) echo "$PWD" ;;
+    i) echo; [[ $FUNCNAME ]] && printf '"'"'function:  %s\n'"'"' "$FUNCNAME" >&2; printf '"'"'caller  :  %s\n'"'"' "$0" >&2; [[ $BASH_LINENO ]] && printf '"'"'line    :  %s\n'"'"' "${BASH_LINENO}" >&2; printf '"'"'command :  %s\n'"'"' "${BASH_COMMAND}" >&2 ;;
+    d) set -xv ;;
+    D) set +xv ;;
+    v) declare -p ;; 
+    V) declare -p >"${PWD}"/.vars ;; 
+    e) env ;; 
+    E) env >"${PWD}"/.env ;; 
+esac' INT
 
 customIso_init() {
     # check inputs and set defaults
@@ -284,6 +298,8 @@ customIso_prepRootfs() {
     sudo umount "${customIsoTmpDir}"/mnt/iso_old
     sudo mount "${customIsoRootfsPath}" "${customIsoRootfsMountPoint}"
 
+    # 
+    
     # extract Fedora version from rootfs
     { [[ -n ${customIsoReleaseVer} ]] && echo "${customIsoReleaseVer}" | grep -q -E '^[0-9]*[1-9]+[0-9]*$'; } || customIsoReleaseVer="$(find "${customIsoRootfsMountPoint}"/lib/modules -maxdepth 1 -mindepth 1 -type d | sed -E s/'^.*\/[0-9\.\-]*\.fc([0-9]+)\..*$'/'\1'/ | sort -uV | tail -n 1)"
     [[ -z ${customIsoLabelShort} ]] && customIsoLabelShort="F${customIsoReleaseVer}-LIVE-CUSTOM"
@@ -494,7 +510,7 @@ customIso_generateLiveIso() {
     mkdir -p "${customIsoTmpDir}"/tmp
     
     # run livemedia-creator to generate new ISO
-    PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}"/lorax/src/ "${customIsoTmpDir}"/lorax/src/sbin/livemedia-creator --make-iso --ks="${customIsoTmpDir}/lorax/docs/fedora-livemedia.ks.flat" --fs-image="${customIsoRootfsPath}" --fs-label="${customIsoFsLabel}" --iso-only --iso-name "${customIsoFsLabel}.iso" --iso "${customIsoTmpDir}/lorax/anaconda_iso/images/boot.iso" --lorax-templates="${customIsoTmpDir}/lorax/share/" --resultdir "${customIsoTmpDir}/ISO" --releasever "${customIsoReleaseVer}" --nomacboot --dracut-conf /etc/dracut.conf.d/dracut-customLiveIso.conf --tmp "${customIsoTmpDir}"/tmp --extra-boot-args "rd.live.image rd.live.check rd.live.dir=/LiveOS rd.live.squashimg=squashfs.img rd.auto=1 gpt zswap.enabled=1 zswap.compressor=lzo-rle transparent_hugepages=madvise panic=60  mitigations=auto spec_store_bypass_disable=auto noibrs noibpb spectre_v2=auto spectre_v2_user=auto pti=auto retbleed=auto tsx=auto rd.timeout=60 systemd.show_status rd.info rd.udev.log-priority=info rd.shell selinux=0 $(${useNvidiaFlag} && echo "rd.driver.blacklist=nouveau rd.modprobe.blacklist=nouveau rd.driver.pre=nvidia rd.driver.pre=nvidia_uvm rd.driver.pre=nvidia_drm rd.driver.pre=drm rd.driver.pre=nvidia_modeset driver.blacklist=nouveau modprobe.blacklist=nouveau driver.pre=nvidia driver.pre=nvidia_uvm driver.pre=nvidia_drm driver.pre=drm driver.pre=nvidia_modeset nvidia-drm.modeset=1" || echo -n '')" 
+    PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}"/lorax/src/ ""${customIsoTmpDir}"/lorax/src/sbin/livemedia-creator" --make-iso --ks="${customIsoTmpDir}/lorax/docs/fedora-livemedia.ks.flat" --fs-image="${customIsoRootfsPath}" --fs-label="${customIsoFsLabel}" --iso-only --iso-name "${customIsoFsLabel}.iso" --iso "${customIsoTmpDir}/lorax/anaconda_iso/images/boot.iso" --lorax-templates="${customIsoTmpDir}/lorax/share/" --resultdir "${customIsoTmpDir}/ISO" --releasever "${customIsoReleaseVer}" --nomacboot --dracut-conf /etc/dracut.conf.d/dracut-customLiveIso.conf --tmp "${customIsoTmpDir}"/tmp --extra-boot-args "rd.live.image rd.live.check rd.live.dir=/LiveOS rd.live.squashimg=squashfs.img rd.auto=1 gpt zswap.enabled=1 zswap.compressor=lzo-rle transparent_hugepages=madvise panic=60  mitigations=auto spec_store_bypass_disable=auto noibrs noibpb spectre_v2=auto spectre_v2_user=auto pti=auto retbleed=auto tsx=auto rd.timeout=60 systemd.show_status rd.info rd.udev.log-priority=info rd.shell selinux=0 $(${useNvidiaFlag} && echo "rd.driver.blacklist=nouveau rd.modprobe.blacklist=nouveau rd.driver.pre=nvidia rd.driver.pre=nvidia_uvm rd.driver.pre=nvidia_drm rd.driver.pre=drm rd.driver.pre=nvidia_modeset driver.blacklist=nouveau modprobe.blacklist=nouveau driver.pre=nvidia driver.pre=nvidia_uvm driver.pre=nvidia_drm driver.pre=drm driver.pre=nvidia_modeset nvidia-drm.modeset=1" || echo -n '')" 
 }
 
 customIso_generateLiveIso
