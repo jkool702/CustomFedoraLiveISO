@@ -3,7 +3,7 @@ Script that allows one to easily generate a custom Live Fedora ISO image by cust
 
 # USAGE
 
-The script has been designed to make generating a custom Live Fedora ISO image as easy as possible. At the top there are a number of user-tweakable parameters, but these are not reuired to be set. To run this script, you only need to do 2 things:
+The script has been designed to make generating a custom Live Fedora ISO image as easy as possible. At the top there are a number of user-tweakable parameters, but these are not required to be set. To run this script, you only need to do 2 things:
 
 1) Select an existing ISO image to serve as the "base" ISO. This is what you will start with when you begin customizing the ISO. Do this by either:
 
@@ -15,7 +15,9 @@ The script has been designed to make generating a custom Live Fedora ISO image a
 
 NOTE: GUI-based setup is not supported - you must be able to customize the system from a CLI interface. BUT, everything else is taken care of for you by the script - there is no need to fool with editing kickstart files or running lorax / livemedia-creator / livecd-creator, etc.
 
-NOTE: is you define customIsoUSBDevPath to be a valid device under /dev, the ISO will be burned to $customIsoUSBDevPath using `livecd-iso-to-disk`
+NOTE: if you define customIsoUSBDevPath to be a valid device under /dev, the ISO will be burned to $customIsoUSBDevPath using `livecd-iso-to-disk`
+
+**WARNING**: Currently this does not work if the live ISO's `/boot` is on NTFS, because livemedia-creator adds in GRUB without NTFS support. This means that `/boot` *must* be FAT32, which in turn means that the maximum size of the squashfs root filesystem image in 4 GB. The vanilla live ISO images have squashfs root filesystems that are around 1.5-2gb, so you can add a good bit of stuff to the live image and keep it under 4 gb, but you can NOT add *everything* to them.
 
 # CODE
 
