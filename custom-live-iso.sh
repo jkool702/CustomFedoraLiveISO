@@ -5,21 +5,23 @@
 # # # # # # # # # # # # # # SET PARAMETERS  # # # # # # # # # # # # # # # # # 
 # all paramaters (except for customIsoUSBDevPath) will be assigned default values or assigned via a user-interactive prompt if left blank
 
-#customIsoReleaseVer=37                            # Fedora release version to use. Default is to try to extract it from the base iso filename.
+customIsoReleaseVer=41                             # Fedora release version to use. Default is to try to extract it from the base iso filename.
 #customIsoTmpDir=/tmp/customIso                    # main directory where everything is stored. Defaults to /var/tmp (on disk) if you have <32 gb ram, and to /tmp (ramdisk) if you have >= 32 gb ram
 #customIsoRootfsDir="${customIsoTmpDir}"/rootfs # where the unsquashed live ISO rootfs.img is stored
 #customIsoRootfsMountPoint="${customIsoTmpDir}"/sysroot            # where to mount the live ISO rootfs while you modify it
 #customIsoFsLabel='FEDORA-37-KDE-LIVE-CUSTOM'     # filesystem label. Default is "${origIsoFileName%.iso}-CUSTOM"
 #customIsoLabelShort='F37-KDE-LIVE'             # short filesystem label
 #customIsoUSBDevPath=/dev/sdk                     # dev path for usb to write ISO to. Leave blank to just make the ISO without burning it to a USB
-#rootfsSizeGB=64                                 # this is how much space youll have in the live OS. Because this is in a squashfs increasing the free space doesnt really increase the ISO size much. Default is 16 GB.
-#useNvidiaFlag=true                               # true/false. this adds stuff to the dracut (drivers + kernel cmdline) to *hopefully* make the nvidia modules load and not the nouveau ones. default depends on if there is any trace on nvidia on the host system.
+rootfsSizeGB=64                                 # this is how much space youll have in the live OS. Because this is in a squashfs increasing the free space doesnt really increase the ISO size much. Default is 16 GB.
+useNvidiaFlag=true                               # true/false. this adds stuff to the dracut (drivers + kernel cmdline) to *hopefully* make the nvidia modules load and not the nouveau ones. default depends on if there is any trace on nvidia on the host system.
 
 # TO USE PRE-DOWNLOADED IMAGE, SPECIFY origIsoSource="file://<path>" --OR-- leave origIsoSource blank and place/link the ISO somewhere under $customIsoTmpDir
 # if left blank, you will be promoted to choose one of the current fedora "respins" to download OR to choose a local ISO found somewhere under $customIsoTmpDir
 #origIsoSource='https://download.fedoraproject.org/pub/fedora/linux/releases/test/39_Beta/Spins/x86_64/iso/Fedora-KDE-Live-x86_64-39_Beta-1.1.iso'
+#origIsoSource='https://dl.fedoraproject.org/pub/fedora/linux/releases/41/Spins/x86_64/iso/Fedora-KDE-Live-x86_64-41-1.4.iso'
 #origIsoSource='https://dl.fedoraproject.org/pub/alt/live-respins/F37-KDE-x86_64-LIVE-20221201.iso'
-#origIsoSource='file:///${HOME}/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
+#origIsoSource='file:///home/anthony/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
+origIsoSource='file:///mnt/ramdisk/Fedora-KDE-Live-x86_64-41-1.4.iso'
 
 # # # # # # # # # # # # # # DEFINE SOME HELPER FUNCTIONS # # # # # # # # # # # # # # # # # 
 
@@ -153,21 +155,32 @@ setenforce 0
 
 # set trap for cleanup
 trap cleanup_umount EXIT HUP TERM QUIT ABRT
-trap 'printf "%s\n" "" "press [a] to Abort (exit)" "press [u] to Unset INT trap (makes <ctrl> + <c> work normally again)" "press [x] to eXecute a command" "press [p] to print the Present working directory" "press [i] to print Information about what caller/function/line/command is currently running" "press [d] / [D] to start (set -xv) / stop (set +xv) printing Debug output to stderr" "press [v] / [V] to write Vars (declare -p) to [stdout] / to [file (${PWD}/.vars)]" "press [e] / [E] to write Environment (env) to [stdout] / to [file (${PWD}/.env)]" "press anything else to continue" >&2; 
-read -r -n 1; 
-case "$REPLY" in 
-    a) exit ;; 
-    u) trap - INT ;; 
-    x) if [[ $USER == root ]] && [[ ${SUDO_USER} ]] && ! [[ ${SUDO_USER} == root ]] && type -a su &>/dev/null; then su -p "${SUDO_USER}" < <(read -r && echo "$REPLY"); elif ! [[ $USER == root ]]; then source <(read -r && echo "$REPLY"); else echo "for security running generic commands as root is not allowed" >&2; fi ;; 
-    p) echo "$PWD" ;;
-    i) echo; [[ $FUNCNAME ]] && printf '"'"'function:  %s\n'"'"' "$FUNCNAME" >&2; printf '"'"'caller  :  %s\n'"'"' "$0" >&2; [[ $BASH_LINENO ]] && printf '"'"'line    :  %s\n'"'"' "${BASH_LINENO}" >&2; printf '"'"'command :  %s\n'"'"' "${BASH_COMMAND}" >&2 ;;
-    d) set -xv ;;
-    D) set +xv ;;
-    v) declare -p ;; 
-    V) declare -p >"${PWD}"/.vars ;; 
-    e) env ;; 
-    E) env >"${PWD}"/.env ;; 
-esac' INT
+
+_trap_int() (
+    printf '%s\n' "" "press [q] to Quit (exit)" "press [u] to Unset INT trap (makes <ctrl> + <c> work normally again)" "press [x] to eXecute a command" "press [p] to print the Present working directory to stderr" "press [P] to Print the value of a specific variable" "press [i] to print Information about what caller/function/line/command is currently running to stderr" "press [d] / [D] to [start] (set -xv) / to [stop] (set +xv) printing Debug output to stderr" "press [v] / [V] to write Variables (declare -p) to [stderr] / to [file (${PWD}/.vars)]" "press [f] / [F] to write Functions (declare -f) to [stderr] / to [file (${PWD}/.funcs)]" "press [a] / [A] to write Aliases (alias) to [stderr] / to [file (${PWD}/.aliases)]" "press [e] / [E] to write Environment (env) to [stderr] / to [file (${PWD}/.env)]" "press anything else to continue" >&2; 
+    read -r -n 1
+    echo >&2
+    case "$REPLY" in 
+        q) exit ;; 
+        u) trap - INT ;; 
+        x) if [[ $USER == root ]] && [[ ${SUDO_USER} ]] && ! [[ ${SUDO_USER} == root ]] && type -a su &>/dev/null; then echo "type command to run:" >&2; su -p "${SUDO_USER}" < <(read -r && echo "$REPLY"); elif ! [[ $USER == root ]]; then echo "type command to run:" >&2; source <(read -r && echo "$REPLY"); else echo "for security running generic commands as root is not allowed" >&2; fi ;; 
+        p) echo "$PWD"  >&2 ;;
+        P) echo "enter variable name:" >&2; read -r && echo "${REPLY} = ${!REPLY}" >&2 ;;
+        i) echo; [[ $FUNCNAME ]] && printf 'function:  %s\n' "$FUNCNAME" >&2; printf 'caller  :  %s\n' "$0" >&2; [[ $BASH_LINENO ]] && printf 'line    :  %s\n' "${BASH_LINENO}" >&2; printf 'command :  %s\n' "${BASH_COMMAND}" >&2 ;;
+        d) set -xv ;;
+        D) set +xv ;;
+        v) declare -p >&2 ;; 
+        V) declare -p >"${PWD}"/.vars ;; 
+        f) declare -f >&2 ;; 
+        F) declare -f >"${PWD}"/.funcs ;; 
+        a) alias >&2 ;; 
+        A) alias >"${PWD}"/.aliases ;; 
+        e) env >&2 ;; 
+        E) env >"${PWD}"/.env ;; 
+    esac
+)
+    
+trap '_trap_int' INT
 
 customIso_init() {
     # check inputs and set defaults
@@ -192,7 +205,7 @@ customIso_init() {
     fi
 
     # Install dependencies. Note: this probably isnt a complete list of all required dependencies. Let me know of any Ive missed and Ill add them.
-    sudo dnf --skip-broken install git 'livecd*' 'lorax*' systemd-container lshw wget isomd5sum '*kickstart*' qemu qemu-kvm syslinux systemd-container dracut-live isomd5sum mock coreutils fallocate
+    sudo dnf --skip-broken install git 'livecd*' 'lorax*' systemd-container lshw wget isomd5sum '*kickstart*' qemu qemu-kvm syslinux systemd-container dracut-live isomd5sum mock coreutils util-linux 
     
     # make directories
     mkdir -p "${customIsoTmpDir}"/mnt/iso_old
@@ -209,7 +222,7 @@ customIso_getOrigIso () {
     # select and download respin if `origIsoSource` not given
     until [[ -n ${origIsoSource} ]]; do
         PS3='please select fedora-live respin ISO image to download and customize: '
-        select origIsoSource in 'SELECT LOCAL ISO (NO DOWNLOAD)' $(wget --spider -r -l 1 --no-parent 'https://dl.fedoraproject.org/pub/alt/live-respins/' 2>&1 | grep -F 'https://dl.fedoraproject.org/pub/alt/live-respins' | sed -E s/'^.*\/'// | grep -E '^F') 
+        select origIsoSource in 'SELECT LOCAL ISO (NO DOWNLOAD)' $(wget --spider -r -l 1 --no-parent 'https://dl.fedoraproject.org/pub/alt/live-respins/' 2>&1 | grep -F 'https://dl.fedoraproject.org/pub/alt/live-respins' | sed -E 's/^.*\///;s/\]$//;s/'"'"' \.\.\.$//' | grep -E '^F' | sort -u) 
         do
             echo "You Chose: ${origIsoSource}"
             if (( ${REPLY} == 1 )); then
@@ -259,7 +272,7 @@ customIso_getOrigIso () {
             echo "Now Downloading ISO image and (if available) checksums from ${origIsoSource}" >&2
             wget --output-document="${origIsoFilePath}" "${origIsoSource}"
             
-            mapfile -t availIsoChecksums < <(wget --spider -r -l 1 --no-parent "${origIsoSource%/*}" 2>&1 | grep -F "${origIsoSource%/*}" | awk '{print $3}' | grep -i checksum | sort -u)
+            mapfile -t availIsoChecksums < <(wget --spider -r -l 1 --no-parent "${origIsoSource%/*}" 2>&1 | grep -F "${origIsoSource%/*}" | awk '{print $3}' | sed -E s/'^'"'"'(.*)'"'"'$'/'\1'/ | grep -i checksum | sort -u)
             (( ${#availIsoChecksums[@]} > 0 )) && wget --output-document="${origIsoFilePath}.checksum" "${availIsoChecksums[@]}"
             
             isoVerifiedFlag=$(verifyIsoChecksum "${origIsoFilePath}")
@@ -273,30 +286,60 @@ customIso_getOrigIso
 customIso_prepRootfs() {   
     # mount original iso image
     sudo mount "${origIsoFilePath}" "${customIsoTmpDir}"/mnt/iso_old
+    mkdir -p "${customIsoRootfsDir}"
     
-    # unsquash root filesystem
-    sudo unsquashfs -d "${customIsoRootfsDir}" -f -x "$(find "${customIsoTmpDir}"/mnt/iso_old/ -type f -name 'squashfs.img')"
-    customIsoRootfsPath="$(find "${customIsoRootfsDir}" -type f -name 'rootfs.img')"
-    
-    rootfsOrigSize=$(du "${customIsoRootfsPath}" --bytes | awk '{print $1}')
+    if unsquashfs -l "$(find "${customIsoTmpDir}"/mnt/iso_old/ -type f -name 'squashfs.img')" | grep -qiE 'rootfs.img$'; then
 
-    # zero-pad image to ${rootfsSizeGB} GiB
-    dd if=/dev/zero count=$(( ( ( ${rootfsSizeGB} * ( 2 ** 30 ) )  - ${rootfsOrigSize} ) / ( 2  ** 20 ) )) bs=$(( 2 ** 20 )) >> "${customIsoRootfsPath}"
-    dd if=/dev/zero bs=$(( ( ${rootfsSizeGB} * ( 2 ** 30 ) )  - $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') )) count=1 >> "${customIsoRootfsPath}"
+        # unsquash root filesystem
+        sudo unsquashfs -d "${customIsoRootfsDir}" -f -x "$(find "${customIsoTmpDir}"/mnt/iso_old/ -type f -name 'squashfs.img')"
+        customIsoRootfsPath="$(find "${customIsoRootfsDir}" -type f -name 'rootfs.img')"
+        
+        rootfsOrigSize=$(du "${customIsoRootfsPath}" --bytes | awk '{print $1}')
 
-    fallocate -p -o ${rootfsOrigSize} -l $(( $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}')  - ${rootfsOrigSize} )) "${customIsoRootfsPath}"
-    
-    sudo umount -R "${customIsoRootfsMountPoint}"
-    sudo umount -R "${customIsoRootfsPath}"
+        # zero-pad image to ${rootfsSizeGB} GiB
+        dd if=/dev/zero count=$(( ( ( ${rootfsSizeGB} << 30 )  - ${rootfsOrigSize} ) >> 20 )) bs=$(( 1 << 20 )) >> "${customIsoRootfsPath}"
+        (( $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') == ( ${rootfsSizeGB} >> 30 ) )) || dd if=/dev/zero bs=$(( ( ${rootfsSizeGB} >> 30 )  - $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') )) count=1 >> "${customIsoRootfsPath}"
 
-    # extend ext4 filesystem 
-    e2fsck -f -p "${customIsoRootfsPath}"
-    resize2fs "${customIsoRootfsPath}" -b
-    resize2fs "${customIsoRootfsPath}"
+        fallocate -p -o ${rootfsOrigSize} -l $(( $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}')  - ${rootfsOrigSize} )) "${customIsoRootfsPath}"
+
+        sudo umount -R "${customIsoRootfsMountPoint}"
+        sudo umount -R "${customIsoRootfsPath}"
+
+        # extend ext4 filesystem 
+        e2fsck -f -p "${customIsoRootfsPath}"
+        resize2fs "${customIsoRootfsPath}" -b
+        resize2fs "${customIsoRootfsPath}"        
+
+        # mount unsquashed+extended rootfs
+        sudo mount "${customIsoRootfsPath}" "${customIsoRootfsMountPoint}"
+
+    else  
+
+        # setup empty ext4 rootfs.img
+        customIsoRootfsPath="${customIsoRootfsDir}"/rootfs.img
+        : >"${customIsoRootfsPath}"
+        dd if=/dev/zero count=$(( ${rootfsSizeGB} << 10 )) bs=$(( 1 << 20 )) >>"${customIsoRootfsPath}"
+        fallocate -p -o 0 -l $(( ${rootfsSizeGB} << 30 )) "${customIsoRootfsPath}"
+        mkfs.ext4 "${customIsoRootfsPath}"
+
+        # unsquash data to rootfs image
+        sudo mount "${customIsoRootfsPath}" "${customIsoRootfsMountPoint}"
+        sudo unsquashfs -d "${customIsoRootfsMountPoint}" -f -x "$(find "${customIsoTmpDir}"/mnt/iso_old/ -type f -name 'squashfs.img')"
+
+        sudo umount -R "${customIsoRootfsMountPoint}"
+        sudo umount -R "${customIsoRootfsPath}"
+        e2fsck -f -p "${customIsoRootfsPath}"
+
+        # mount unsquashed+extended rootfs
+        sudo mount "${customIsoRootfsPath}" "${customIsoRootfsMountPoint}"
+
+
+    fi
+  
+
     
-    # umount orig iso and mount unsquashed rootfs
+    # umount orig iso 
     sudo umount "${customIsoTmpDir}"/mnt/iso_old
-    sudo mount "${customIsoRootfsPath}" "${customIsoRootfsMountPoint}"
 
     # 
     
@@ -310,7 +353,7 @@ customIso_prepRootfs() {
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable NetworkManager-wait-online.service
-    sudo systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'cat /etc/passwd | grep -qE ^liveuser && userdel liveuser; cat /etc/group | grep -qE ^liveuser && groupdel liveuser; useradd -e "-1" -f "-1" -G wheel -s /usr/bin/bash -p "" -u 1000 -m -U liveuser; passwd -d -f liveuser; passwd -u -f liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
+    sudo systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'cat /etc/passwd | grep -qE ^liveuser && userdel liveuser; cat /etc/group | grep -qE ^liveuser && groupdel liveuser; useradd -e "-1" -f "-1" -G wheel -s /usr/bin/bash -p "" -u 1000 -m -U liveuser; passwd -d -f liveuser; passwd -u liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
     systemctl is-enabled systemd-networkd || sudo systemctl enable systemd-networkd --now
     
     # add in repos from host system
@@ -424,13 +467,15 @@ customIso_setupDracutConf() {
     mapfile -t dracutAddModules < <(printf '%s\n' "${dracutAddModules[@]}" | sort -u | grep -E -f <(printf '^%s$\n' "$(getIsoDracutModules "${customIsoRootfsMountPoint}")"))
     
     # add dracut.conf to rootfs.img
+    mkdir -p /etc/dracut.live.conf.d/
+    mkdir -p "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/
     cat > "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf <<EOF
 compress=xz
 squash_compress=xz
 omit_dracutmodules+=" zfs plymouth "
 add_dracutmodules+=" ${dracutAddModules[@]} "
 hostonly=no
-persistent_policy=by-id
+persistent_policy=by-uuid
 install_optional_items+=" /sbin/sysctl /sbin/sysctl /bin/ntfs-3g /bin/ntfs-3g "
 mdadmconf=no
 lvmconf=no
@@ -440,14 +485,17 @@ $(${useNvidiaFlag} && echo 'add_drivers+=" nvidia-drm nvidia nvidia-modeset nvid
 EOF
 
     # copy to host system
-    dirAutoRename /etc/dracut.conf.d/dracut-customLiveIso.conf
-    \cp -f "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf /etc/dracut.conf.d/dracut-customLiveIso.conf
+    dirAutoRename /etc/dracut.live.conf.d/dracut-customLiveIso.conf
+    \cp -f "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d/dracut-customLiveIso.conf
     
     # remove temp /lib/modules symlink in live ISO rootfs (if we made this earlier)
     ${setupLibModulesSymlinkFlag} && rm -f "${customIsoRootfsMountPoint}/lib/modules/$(uname -r)"    
     
     # make sure that user 'liveuser' is still valid  and active and passwordless, and that network-wait-online services are still disabled.
-    sudo systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'usermod -a -G wheel liveuser; usermod -e "-1" -f "-1" -s /usr/bin/bash -p "" liveuser; passwd -d -f liveuser; passwd -u -f liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
+    sudo systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'usermod -a -G wheel liveuser; usermod -e "-1" -f "-1" -s /usr/bin/bash -p "" liveuser; passwd -d liveuser; passwd -u liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
+
+    mkdir -p /etc/dracut.live.conf.d
+    cp "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d
     
     # umount modified image
     sudo umount -R "${customIsoRootfsMountPoint}"
@@ -492,10 +540,10 @@ customIso_mockBuildAnacondaBootIso() {
     # build anaconda boot.iso with lorax
     dirAutoRename "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}/lorax/anaconda_iso"
  
-     if curl https://dl.fedoraproject.org/pub/fedora/linux/development/39/Everything/x86_64/os/repodata/repomd.xml 2>/dev/null | grep -q '404 Not Found'; then
-        sudo mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}/lorax/src/" "${customIsoTmpDir}/lorax/src/sbin/lorax" -p Fedora -v "${customIsoReleaseVer}" -r "${customIsoReleaseVer}" -s https://dl.fedoraproject.org/pub/fedora/linux/updates/"${customIsoReleaseVer}"/Everything/x86_64/ --sharedir "${customIsoTmpDir}/lorax/share/templates.d/99-generic/" "${customIsoTmpDir}/lorax/anaconda_iso/"
+     if curl https://dl.fedoraproject.org/pub/fedora/linux/releases/"${customIsoReleaseVer}"/Everything/x86_64/os/repodata/repomd.xml 2>/dev/null | grep -q '404 Not Found'; then
+        sudo mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}/lorax/src/" "${customIsoTmpDir}/lorax/src/sbin/lorax" -p Fedora -v "${customIsoReleaseVer}" -r "${customIsoReleaseVer}" -s https://dl.fedoraproject.org/pub/fedora/linux/releases/"${customIsoReleaseVer}"/Everything/x86_64/os --sharedir "${customIsoTmpDir}/lorax/share/templates.d/99-generic/" "${customIsoTmpDir}/lorax/anaconda_iso/"
     else
-        sudo mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}/lorax/src/" "${customIsoTmpDir}/lorax/src/sbin/lorax" -p Fedora -v "${customIsoReleaseVer}" -r "${customIsoReleaseVer}" -s https://dl.fedoraproject.org/pub/fedora/linux/updates/"${customIsoReleaseVer}"/Everything/x86_64/ -s https://dl.fedoraproject.org/pub/fedora/linux/development/"${customIsoReleaseVer}"/Everything/x86_64/os/ --sharedir "${customIsoTmpDir}/lorax/share/templates.d/99-generic/" "${customIsoTmpDir}/lorax/anaconda_iso/"
+        sudo mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}/lorax/src/" "${customIsoTmpDir}/lorax/src/sbin/lorax" -p Fedora -v "${customIsoReleaseVer}" -r "${customIsoReleaseVer}" -s https://dl.fedoraproject.org/pub/fedora/linux/releases/"${customIsoReleaseVer}"/Everything/x86_64/os -s https://dl.fedoraproject.org/pub/fedora/linux/development/"${customIsoReleaseVer}"/Everything/x86_64/os/ --sharedir "${customIsoTmpDir}/lorax/share/templates.d/99-generic/" "${customIsoTmpDir}/lorax/anaconda_iso/"
     fi
     
     sudo umount "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}"
@@ -504,13 +552,13 @@ customIso_mockBuildAnacondaBootIso() {
 customIso_mockBuildAnacondaBootIso
 
 customIso_generateLiveIso() {
-    # output dir must be empty or else livemedia-creator complains - rename it if it exists
+    # output dir must be empty or else livemedia-creator complains - rename it if it existsbootparam
     dirAutoRename "${customIsoTmpDir}/ISO"
 
     mkdir -p "${customIsoTmpDir}"/tmp
     
     # run livemedia-creator to generate new ISO
-    PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}"/lorax/src/ ""${customIsoTmpDir}"/lorax/src/sbin/livemedia-creator" --make-iso --ks="${customIsoTmpDir}/lorax/docs/fedora-livemedia.ks.flat" --fs-image="${customIsoRootfsPath}" --fs-label="${customIsoFsLabel}" --iso-only --iso-name "${customIsoFsLabel}.iso" --iso "${customIsoTmpDir}/lorax/anaconda_iso/images/boot.iso" --lorax-templates="${customIsoTmpDir}/lorax/share/" --resultdir "${customIsoTmpDir}/ISO" --releasever "${customIsoReleaseVer}" --nomacboot --dracut-conf /etc/dracut.conf.d/dracut-customLiveIso.conf --tmp "${customIsoTmpDir}"/tmp --extra-boot-args "rd.live.image rd.live.check rd.live.dir=/LiveOS rd.live.squashimg=squashfs.img rd.auto=1 gpt zswap.enabled=1 zswap.compressor=lzo-rle transparent_hugepages=madvise panic=60  mitigations=auto spec_store_bypass_disable=auto noibrs noibpb spectre_v2=auto spectre_v2_user=auto pti=auto retbleed=auto tsx=auto rd.timeout=60 systemd.show_status rd.info rd.udev.log-priority=info rd.shell selinux=0 $(${useNvidiaFlag} && echo "rd.driver.blacklist=nouveau rd.modprobe.blacklist=nouveau rd.driver.pre=nvidia rd.driver.pre=nvidia_uvm rd.driver.pre=nvidia_drm rd.driver.pre=drm rd.driver.pre=nvidia_modeset driver.blacklist=nouveau modprobe.blacklist=nouveau driver.pre=nvidia driver.pre=nvidia_uvm driver.pre=nvidia_drm driver.pre=drm driver.pre=nvidia_modeset nvidia-drm.modeset=1" || echo -n '')" 
+    PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}"/lorax/src/ ""${customIsoTmpDir}"/lorax/src/sbin/livemedia-creator" --make-iso --ks="${customIsoTmpDir}/lorax/docs/fedora-livemedia.ks.flat" --fs-image="${customIsoRootfsPath}" --fs-label="${customIsoFsLabel}" --iso-only --iso-name "${customIsoFsLabel}.iso" --iso "${customIsoTmpDir}/lorax/anaconda_iso/images/boot.iso" --lorax-templates="${customIsoTmpDir}/lorax/share/" --resultdir "${customIsoTmpDir}/ISO" --releasever "${customIsoReleaseVer}" --nomacboot --dracut-conf /etc/dracut.live.conf.d/dracut-customLiveIso.conf --tmp "${customIsoTmpDir}"/tmp --extra-boot-args "rd.live.image rd.live.check rd.live.dir=/LiveOS rd.live.squashimg=squashfs.img rd.auto=1 gpt zswap.enabled=1 zswap.compressor=lzo-rle transparent_hugepages=madvise panic=60  mitigations=auto spec_store_bypass_disable=auto noibrs noibpb spectre_v2=auto spectre_v2_user=auto pti=auto retbleed=auto tsx=auto rd.timeout=60 systemd.show_status rd.info rd.udev.log-priority=info rd.shell selinux=0 $(${useNvidiaFlag} && echo "rd.driver.blacklist=nouveau rd.modprobe.blacklist=nouveau rd.driver.pre=nvidia rd.driver.pre=nvidia_uvm rd.driver.pre=nvidia_drm rd.driver.pre=drm rd.driver.pre=nvidia_modeset driver.blacklist=nouveau modprobe.blacklist=nouveau driver.pre=nvidia driver.pre=nvidia_uvm driver.pre=nvidia_drm driver.pre=drm driver.pre=nvidia_modeset nvidia-drm.modeset=1" || echo -n '')" 
 }
 
 customIso_generateLiveIso
