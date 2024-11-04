@@ -6,7 +6,7 @@
 # all paramaters (except for customIsoUSBDevPath) will be assigned default values or assigned via a user-interactive prompt if left blank
 
 customIsoReleaseVer=41                             # Fedora release version to use. Default is to try to extract it from the base iso filename.
-#customIsoTmpDir=/tmp/customIso                    # main directory where everything is stored. Defaults to /var/tmp (on disk) if you have <32 gb ram, and to /tmp (ramdisk) if you have >= 32 gb ram
+customIsoTmpDir=/tmp/customIso                    # main directory where everything is stored. Defaults to /var/tmp (on disk) if you have <32 gb ram, and to /tmp (ramdisk) if you have >= 32 gb ram
 #customIsoRootfsDir="${customIsoTmpDir}"/rootfs # where the unsquashed live ISO rootfs.img is stored
 #customIsoRootfsMountPoint="${customIsoTmpDir}"/sysroot            # where to mount the live ISO rootfs while you modify it
 #customIsoFsLabel='FEDORA-37-KDE-LIVE-CUSTOM'     # filesystem label. Default is "${origIsoFileName%.iso}-CUSTOM"
@@ -21,7 +21,8 @@ useNvidiaFlag=true                               # true/false. this adds stuff t
 #origIsoSource='https://dl.fedoraproject.org/pub/fedora/linux/releases/41/Spins/x86_64/iso/Fedora-KDE-Live-x86_64-41-1.4.iso'
 #origIsoSource='https://dl.fedoraproject.org/pub/alt/live-respins/F37-KDE-x86_64-LIVE-20221201.iso'
 #origIsoSource='file:///home/anthony/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
-origIsoSource='file:///mnt/ramdisk/Fedora-KDE-Live-x86_64-41-1.4.iso'
+#origIsoSource='file:///mnt/ramdisk/Fedora-KDE-Live-x86_64-41-1.4.iso'
+origIsoSource='file:///root/Fedora-KDE-Live-x86_64-41-1.4-CUSTOM.iso'
 
 # # # # # # # # # # # # # # DEFINE SOME HELPER FUNCTIONS # # # # # # # # # # # # # # # # # 
 
@@ -122,21 +123,22 @@ getIsoDracutModules() {
 
     echo -e "\n\nDetermining which dracut modules the custom ISO is capable of running \n(for each dracut module this checks that all required binaries are present on the system)\n\n" >&2
 
-    mapfile -t customIsoDracutModules < <(find "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/ -mindepth 1 -maxdepth 1 -type d | sed -E s/'^.*\/usr\/lib\/dracut\/modules.d\/'// | sed -E s/'^[0-9]{2}'//)
+    mapfile -t customIsoDracutModules < <(find "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/ -mindepth 1 -maxdepth 1 -type d -printf '%P\n' | sed -E s/'^[0-9]{2}'//)
 
     for dracutMod in "${customIsoDracutModules[@]}"; do 
-        unset reqAll; unset reqAny; unset reqMetFlag;
-        mapfile -t reqAll < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/*"${dracutMod}"/*.sh | grep -F 'require_binaries' | sed -E s/'^.*require_binaries '// | sed -E s/.'((\|\|)|(\;)|(\\)).*$'// | sed -zE s/'[ \t]+'/'\n'/g); 
-        mapfile -t reqAny < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/*"${dracutMod}"/*.sh | grep -F 'require_any_binary' |sed -E s/'^.*require_any_binary '// | sed -E s/.'((\|\|)|(\;)|(\\)).*$'// | sed -zE s/'[ \t]+'/'\n'/g);
-
+        unset reqAll; unset reqAny; 
         reqMetFlag=false
-        (( ${#reqAny[@]} == 0 )) && reqMetFlag=true || for nn in "${reqAny[@]##*/}"; do (( $(find "${customIsoRootfsMountPoint}"/usr -type f ! -empty -perm -u+x -perm -g+x -perm -o+x -name "${nn}" | wc -l) > 0 )) && reqMetFlag=true; done
-        ${reqMetFlag} && (( ${#reqAll[@]} > 0 )) && for nn in "${reqAll[@]##*/}"; do (( $(find "${customIsoRootfsMountPoint}"/usr -type f ! -empty -perm -u+x -perm -g+x -perm -o+x -name "${nn}" | wc -l) == 0 )) && reqMetFlag=false; done
+
+        mapfile -t reqAll < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/[0-9][0-9]"${dracutMod}"/*.sh | sed -z -E 's/ \\ *\n[ \t]*([^ \t\|\&])/ \1/g; s/\\\n/\n/g' | grep -F require_binaries | grep -vE '((&& )|(if )|(! )|(if ! ))require_binaries' | sed -E 's/.((\|\|)|(\;)|(\\)).*$//; s/^[ \t]*require_binaries //; s/[ \t]+/\n/g')
+        mapfile -t reqAny < <(cat "${customIsoRootfsMountPoint}"/usr/lib/dracut/modules.d/[0-9][0-9]"${dracutMod}"/*.sh | sed -z -E 's/ \\ *\n[ \t]*([^ \t\|\&])/ \1/g; s/\\\n/\n/g' | grep -F require_any_binaries | grep -vE '((&& )|(if )|(! )|(if ! ))require_any_binaries' | sed -E 's/.((\|\|)|(\;)|(\\)).*$//; s/^[ \t]*require_any_binaries //; s/[ \t]+/\n/g');
+
+        (( ${#reqAny[@]} == 0 )) && reqMetFlag=true || for nn in "${reqAny[@]##*/}"; do chroot "${customIsoRootfsMountPoint}" type -p "${dracutMod}" &>/dev/null && { reqMetFlag=true; break; }; done
+        ${reqMetFlag} && (( ${#reqAll[@]} > 0 )) && for nn in "${reqAll[@]##*/}"; do chroot "${customIsoRootfsMountPoint}" type -p "${dracutMod}" &>/dev/null || reqMetFlag=false; done
         ${reqMetFlag} && echo "${dracutMod}"
     done
 }
 
-# set umount functioin for trap for cleanup
+# set umount function for trap for cleanup
 cleanup_umount() {
     local nn
     mapfile -t umountPaths < <(awk '{print $2}' < /proc/mounts  | grep -F -f <(printf '%s\n' "${customIsoRootfsMountPoint}" "${customIsoTmpDir}"))
@@ -157,27 +159,31 @@ setenforce 0
 trap cleanup_umount EXIT HUP TERM QUIT ABRT
 
 _trap_int() (
-    printf '%s\n' "" "press [q] to Quit (exit)" "press [u] to Unset INT trap (makes <ctrl> + <c> work normally again)" "press [x] to eXecute a command" "press [p] to print the Present working directory to stderr" "press [P] to Print the value of a specific variable" "press [i] to print Information about what caller/function/line/command is currently running to stderr" "press [d] / [D] to [start] (set -xv) / to [stop] (set +xv) printing Debug output to stderr" "press [v] / [V] to write Variables (declare -p) to [stderr] / to [file (${PWD}/.vars)]" "press [f] / [F] to write Functions (declare -f) to [stderr] / to [file (${PWD}/.funcs)]" "press [a] / [A] to write Aliases (alias) to [stderr] / to [file (${PWD}/.aliases)]" "press [e] / [E] to write Environment (env) to [stderr] / to [file (${PWD}/.env)]" "press anything else to continue" >&2; 
-    read -r -n 1
-    echo >&2
-    case "$REPLY" in 
-        q) exit ;; 
-        u) trap - INT ;; 
-        x) if [[ $USER == root ]] && [[ ${SUDO_USER} ]] && ! [[ ${SUDO_USER} == root ]] && type -a su &>/dev/null; then echo "type command to run:" >&2; su -p "${SUDO_USER}" < <(read -r && echo "$REPLY"); elif ! [[ $USER == root ]]; then echo "type command to run:" >&2; source <(read -r && echo "$REPLY"); else echo "for security running generic commands as root is not allowed" >&2; fi ;; 
-        p) echo "$PWD"  >&2 ;;
-        P) echo "enter variable name:" >&2; read -r && echo "${REPLY} = ${!REPLY}" >&2 ;;
-        i) echo; [[ $FUNCNAME ]] && printf 'function:  %s\n' "$FUNCNAME" >&2; printf 'caller  :  %s\n' "$0" >&2; [[ $BASH_LINENO ]] && printf 'line    :  %s\n' "${BASH_LINENO}" >&2; printf 'command :  %s\n' "${BASH_COMMAND}" >&2 ;;
-        d) set -xv ;;
-        D) set +xv ;;
-        v) declare -p >&2 ;; 
-        V) declare -p >"${PWD}"/.vars ;; 
-        f) declare -f >&2 ;; 
-        F) declare -f >"${PWD}"/.funcs ;; 
-        a) alias >&2 ;; 
-        A) alias >"${PWD}"/.aliases ;; 
-        e) env >&2 ;; 
-        E) env >"${PWD}"/.env ;; 
-    esac
+    shopt -s patsub_replacement
+    local nn
+    printf '%s\n' "" "Type the letter(s) representing the command(s) you want run, then press <enter> to execute them" "" "[q] to Quit (exit)" "[r] to Return to what you were running (i.e.,leave this INT trap)" "[u] to Unset this INT trap (after which <ctrl> + <c> will send interrupts / behave normally again)" "[x] to eXecute a (1 line) command" "[p] to print the Present working directory ({$PWD}) to stderr" "[P] to Print the value of a specific variable to stderr" "[i] to print Information about what caller/function/script/line/command is currently running to stderr" "[d] / [D] to [start] (set -xv) / to [stop] (set +xv) printing Debug output to stderr" "[v] / [V] to write Variables (declare -p) to [stderr] / to [file (${PWD}/.vars)]" "[f] / [F] to write Functions (declare -f) to [stderr] / to [file (${PWD}/.funcs)]" "[a] / [A] to write Aliases (alias) to [stderr] / to [file (${PWD}/.aliases)]" "[e] / [E] to write Environment (env) to [stderr] / to [file (${PWD}/.env)]" "" "Selection:  " "" >&2;     read -r 
+    printf '\n\n' >&2
+    for nn in ${REPLY//[[:alnum:]]/& }; do
+        case "${nn}" in 
+            q) exit ;; 
+            r) return ;;
+            u) trap - INT ;; 
+            x) if [[ $USER == root ]] && [[ ${SUDO_USER} ]] && ! [[ ${SUDO_USER} == root ]] && type -a su &>/dev/null; then echo "type command to run:" >&2; su -p "${SUDO_USER}" < <(read -r && echo "$REPLY"); elif ! [[ $USER == root ]]; then echo "type command to run:" >&2; source <(read -r && echo "$REPLY"); else echo "for security running generic commands as root is not allowed" >&2; fi ;; 
+            p) echo "$PWD"  >&2 ;;
+            P) echo "enter variable name:" >&2; read -r && echo "${REPLY} = ${!REPLY}" >&2 ;;
+            i) echo; [[ $FUNCNAME ]] && printf 'function:  %s\n' "$FUNCNAME" >&2; printf 'caller  :  %s\n' "$0" >&2; [[ $BASH_LINENO ]] && printf 'line    :  %s\n' "${BASH_LINENO}" >&2; printf 'command :  %s\n' "${BASH_COMMAND}" >&2 ;;
+            d) set -xv ;;
+            D) set +xv ;;
+            v) declare -p >&2 ;; 
+            V) declare -p >"${PWD}"/.vars ;; 
+            f) declare -f >&2 ;; 
+            F) declare -f >"${PWD}"/.funcs ;; 
+            a) alias >&2 ;; 
+            A) alias >"${PWD}"/.aliases ;; 
+            e) env >&2 ;; 
+            E) env >"${PWD}"/.env ;; 
+        esac
+    done
 )
     
 trap '_trap_int' INT
@@ -353,7 +359,7 @@ customIso_prepRootfs() {
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl enable systemd-networkd
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable systemd-networkd-wait-online.service
     #systemd-nspawn -D "${customIsoRootfsMountPoint}" systemctl disable NetworkManager-wait-online.service
-    sudo systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'cat /etc/passwd | grep -qE ^liveuser && userdel liveuser; cat /etc/group | grep -qE ^liveuser && groupdel liveuser; useradd -e "-1" -f "-1" -G wheel -s /usr/bin/bash -p "" -u 1000 -m -U liveuser; passwd -d -f liveuser; passwd -u liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
+    sudo systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'cat /etc/passwd | grep -qE ^liveuser && userdel liveuser; cat /etc/group | grep -qE ^liveuser && groupdel liveuser; useradd -e "-1" -f "-1" -G wheel -s /usr/bin/bash -p "" -u 1000 -m -U liveuser; passwd -d liveuser; passwd -u liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl enable systemd-networkd; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
     systemctl is-enabled systemd-networkd || sudo systemctl enable systemd-networkd --now
     
     # add in repos from host system
@@ -451,6 +457,9 @@ customIso_nspawnRootfs() {
 customIso_nspawnRootfs
 
 customIso_setupDracutConf() {
+    # ensure rootfs mounted        
+    grep "${customIsoRootfsMountPoint}" </proc/mounts | grep -qF '/dev/loop' || sudo mount "${customIsoRootfsPath}" "${customIsoRootfsMountPoint}"
+
     # if the host kernel is different than the live ISO rootfs's kernel, temporairly make a symlink in the live OS rootfs's /lib/modules directory that goes from host kernel name --> live ISO rootfs kernel name
     if ${setupLibModulesSymlinkFlag}; then
         curPWD="$(pwd)"
@@ -463,19 +472,24 @@ customIso_setupDracutConf() {
     # setup a dracut config file on live ISO rootfs for when we call livemedia-creator later
     declare -a dracutAddModules=( bash systemd systemd-ask-password systemd-coredump systemd-initrd systemd-journald systemd-ldconfig systemd-modules-load systemd-rfkill systemd-sysctl systemd-sysext systemd-sysusers systemd-tmpfiles systemd-udevd systemd-veritysetup dbus drm crypt dm dmsquash-live dmsquash-live-ntfs dmsquash-live-autooverlay kernel-modules kernel-modules-extra kernel-network-modules livenet multipath crypt-gpg tpm2-tss iscsi lunmask resume rootfs-block terminfo udev-rules dracut-systemd pollcdrom base fs-lib img-lib shutdown squash uefi-lib convertfs qemu qemu-net biosdevname convertfs rngd terminfo modsign )
     
+    mapfile -t isoDracutModules < <(getIsoDracutModules)
+
     # filter down to dracut modules we can actually use
-    mapfile -t dracutAddModules < <(printf '%s\n' "${dracutAddModules[@]}" | sort -u | grep -E -f <(printf '^%s$\n' "$(getIsoDracutModules "${customIsoRootfsMountPoint}")"))
+    mapfile -t dracutAddModules < <(printf '%s\n' "${dracutAddModules[@]}" | sort -u | grep -E -f <(printf '^%s$\n' "${isoDracutModules[@]}"))
     
     # add dracut.conf to rootfs.img
+    [[ -f "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf ]] && \rm -f "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf
+    [[ -f  /etc/dracut.live.conf.d/dracut-customLiveIso.conf ]] && && \rm -f  /etc/dracut.live.conf.d/dracut-customLiveIso.conf
     mkdir -p /etc/dracut.live.conf.d/
-    mkdir -p "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/
-    cat > "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf <<EOF
+    ( 
+        IFS=' '
+        cat<<EOF | tee "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d/dracut-customLiveIso.conf >&2
 compress=xz
 squash_compress=xz
-omit_dracutmodules+=" zfs plymouth "
-add_dracutmodules+=" ${dracutAddModules[@]} "
+omit_dracutmodules+=" zfs "
+add_dracutmodules+=" ${dracutAddModules[*]} "
 hostonly=no
-persistent_policy=by-uuid
+persistent_policy=by-label
 install_optional_items+=" /sbin/sysctl /sbin/sysctl /bin/ntfs-3g /bin/ntfs-3g "
 mdadmconf=no
 lvmconf=no
@@ -483,10 +497,11 @@ hostonly_cmdline=yes
 show_modules=yes
 $(${useNvidiaFlag} && echo 'add_drivers+=" nvidia-drm nvidia nvidia-modeset nvidia-peermem nvidia-uvm ntfs3 "' || echo 'add_drivers+=" ntfs3 "')
 EOF
+    )
 
     # copy to host system
-    dirAutoRename /etc/dracut.live.conf.d/dracut-customLiveIso.conf
-    \cp -f "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d/dracut-customLiveIso.conf
+    #dirAutoRename /etc/dracut.live.conf.d/dracut-customLiveIso.conf
+    #\cp -f "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d/dracut-customLiveIso.conf
     
     # remove temp /lib/modules symlink in live ISO rootfs (if we made this earlier)
     ${setupLibModulesSymlinkFlag} && rm -f "${customIsoRootfsMountPoint}/lib/modules/$(uname -r)"    
@@ -494,8 +509,8 @@ EOF
     # make sure that user 'liveuser' is still valid  and active and passwordless, and that network-wait-online services are still disabled.
     sudo systemd-nspawn -D "${customIsoRootfsMountPoint}" -- /usr/bin/bash -c 'usermod -a -G wheel liveuser; usermod -e "-1" -f "-1" -s /usr/bin/bash -p "" liveuser; passwd -d liveuser; passwd -u liveuser; passwd -x "-1" liveuser; usermod -U liveuser; systemctl disable systemd-networkd-wait-online.service; systemctl disable NetworkManager-wait-online.service'
 
-    mkdir -p /etc/dracut.live.conf.d
-    cp "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d
+    #mkdir -p /etc/dracut.live.conf.d
+    #\cp -f "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d
     
     # umount modified image
     sudo umount -R "${customIsoRootfsMountPoint}"
@@ -526,7 +541,7 @@ customIso_mockBuildAnacondaBootIso() {
     # build anaconda boot.iso with lorax in mock (setup using the same fedora release version as the custoom ISO image we wanrt to generate)
     
     # tweak mock config to ensure dnf is available
-    grep -E "^[ \t]*config_opts\['chroot_setup_cmd'\]" /etc/mock/templates/fedora-branched.tpl | grep -q -E "[ ']dnf[ ']" || sed -i -E s/'^([ \t]*config_opts\['"'"'chroot_setup_cmd'"'"'\].*)'"'"/'\1 dnf'"'"/ /etc/mock/templates/fedora-branched.tpl
+    grep -E "^[ \t]*config_opts\['chroot_setup_cmd'\]" /etc/mock/templates/fedora-branched.tpl | grep -q -E "[ ']dnf5?[ ']" || sed -i -E s/'^([ \t]*config_opts\['"'"'chroot_setup_cmd'"'"'\].*)'"'"/'\1 dnf dnf5'"'"/ /etc/mock/templates/fedora-branched.tpl
 
     # setup mock
     sudo mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --init
