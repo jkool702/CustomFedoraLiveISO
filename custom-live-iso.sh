@@ -5,8 +5,8 @@
 # # # # # # # # # # # # # # SET PARAMETERS  # # # # # # # # # # # # # # # # # 
 # all paramaters (except for customIsoUSBDevPath) will be assigned default values or assigned via a user-interactive prompt if left blank
 
-customIsoReleaseVer=41                             # Fedora release version to use. Default is to try to extract it from the base iso filename.
-customIsoTmpDir=/tmp/customIso                    # main directory where everything is stored. Defaults to /var/tmp (on disk) if you have <32 gb ram, and to /tmp (ramdisk) if you have >= 32 gb ram
+#customIsoReleaseVer=41                             # Fedora release version to use. Default is to try to extract it from the base iso filename.
+#customIsoTmpDir=/tmp/customIso                    # main directory where everything is stored. Defaults to /var/tmp (on disk) if you have <32 gb ram, and to /tmp (ramdisk) if you have >= 32 gb ram
 #customIsoRootfsDir="${customIsoTmpDir}"/rootfs # where the unsquashed live ISO rootfs.img is stored
 #customIsoRootfsMountPoint="${customIsoTmpDir}"/sysroot            # where to mount the live ISO rootfs while you modify it
 #customIsoFsLabel='FEDORA-37-KDE-LIVE-CUSTOM'     # filesystem label. Default is "${origIsoFileName%.iso}-CUSTOM"
@@ -20,13 +20,13 @@ useNvidiaFlag=true                               # true/false. this adds stuff t
 #origIsoSource='https://download.fedoraproject.org/pub/fedora/linux/releases/test/39_Beta/Spins/x86_64/iso/Fedora-KDE-Live-x86_64-39_Beta-1.1.iso'
 #origIsoSource='https://dl.fedoraproject.org/pub/fedora/linux/releases/41/Spins/x86_64/iso/Fedora-KDE-Live-x86_64-41-1.4.iso'
 #origIsoSource='https://dl.fedoraproject.org/pub/alt/live-respins/F37-KDE-x86_64-LIVE-20221201.iso'
-#origIsoSource='file:///home/anthony/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
+#origIsoSource='file:///'"${HOME}"'/Downloads/Fedora-KDE-Live-x86_64-39-1.5.iso'
 #origIsoSource='file:///mnt/ramdisk/Fedora-KDE-Live-x86_64-41-1.4.iso'
-origIsoSource='file:///root/Fedora-KDE-Live-x86_64-41-1.4-CUSTOM.iso'
+#origIsoSource='file:///root/Fedora-KDE-Live-x86_64-41-1.4-CUSTOM.iso'
 
 # # # # # # # # # # # # # # DEFINE SOME HELPER FUNCTIONS # # # # # # # # # # # # # # # # # 
 
-dirAutoRename() {
+_dirAutoRename() {
     # if the input directory exists, rename it to ${ORIGNAME}_N, where N is the lowest non-negative integer such that ${ORIGNAME}_N doesnt exist
     local dirIn verboseFlag
     local -i kk
@@ -46,10 +46,10 @@ dirAutoRename() {
     done
 }
 
-verifyIsoChecksum() {
+_verifyIsoChecksum() {
     # verifies the sha256 or sha512 hash of the original "base" ISO image file against a known valid file hash
     #
-    # USAGE: `isoVerifiedFlag=$(verifyIsoChecksum [file://]${origIsoFilePath})` 
+    # USAGE: `isoVerifiedFlag=$(_verifyIsoChecksum [file://]${origIsoFilePath})` 
     # 
     # the ISO image file's valid SHA256 or SHA512 has must be in a file at ${origIsoFilePath}.checksum. This file must contain a line consisting of either:
     #      "$fileHash $fileName" or "$fileName $fileHash"
@@ -108,7 +108,7 @@ verifyIsoChecksum() {
     fi
 }
 
-getIsoDracutModules() {
+_getIsoDracutModules() {
     # this helper function querier the dracut modules that dracut in the customized rootfs image knows about, then goes 1-by-1 and checks if the required binaries exist on the rootfs.img system not.
     # this is needed to ensure that livemedia-creator doesnt use a dracut module that it doesnt have the required binaries for, which would cause ISO generation to fail.
     local -a reqAll
@@ -139,7 +139,7 @@ getIsoDracutModules() {
 }
 
 # set umount function for trap for cleanup
-cleanup_umount() {
+_cleanup_umount() {
     local nn
     mapfile -t umountPaths < <(awk '{print $2}' < /proc/mounts  | grep -F -f <(printf '%s\n' "${customIsoRootfsMountPoint}" "${customIsoTmpDir}"))
     for nn in "${umountPaths[@]}"; do
@@ -156,7 +156,7 @@ cleanup_umount() {
 setenforce 0
 
 # set trap for cleanup
-trap cleanup_umount EXIT HUP TERM QUIT ABRT
+trap _cleanup_umount EXIT HUP TERM QUIT ABRT
 
 _trap_int() (
     shopt -s patsub_replacement
@@ -224,11 +224,25 @@ customIso_init
 customIso_getOrigIso () { 
     # move to main working dir
     cd "${customIsoTmpDir}" 
-    
+
+    # if selecting iso from list, make sure we know the Fedora version
+    if [[ -z ${origIsoSource} ]]; then
+        if [[ -z ${customIsoReleaseVer} ]]; then
+            printf '\n\nPlease enter which Fedora version you would like to see possible downloads for.\nA blank or non-numeric response will use the running Fedora version, and is the same as entering "%s"\n\nFedora version:   ' "$(uname -r | sed -E s/'^.*\.fc([0-9]+)\.[^\.]+$'/'\1'/)" >&2
+            read -r -t 30
+            if [[ -z  ${REPLY} ]] || ! [[ -z ${REPLY//[0-9]/} ]]; then
+                customIsoReleaseVer="$(uname -r | sed -E s/'^.*\.fc([0-9]+)\.[^\.]+$'/'\1'/)"
+            else
+                customIsoReleaseVer="${REPLY}"
+            fi
+        fi
+        mapfile -t origIsoSource_allPossible < <({ curl 'https://dl.fedoraproject.org/pub/alt/imagelist-alt' 2>/dev/null | sed -E s/'^.'/'\/alt'/; curl 'https://dl.fedoraproject.org/pub/fedora/imagelist-fedora' 2>/dev/null | sed -E s/'^\.'/'\/fedora'/; } |  grep '.iso' | grep -E '[^0-9]'"${customIsoReleaseVer}"'[^0-9]' | grep -i "$(uname -m)" | grep -i 'Live' | grep -vE '(/test/)|(/development/)|(live-respins-archive)|(/'"${customIsoReleaseVer}"'_(RC|Beta))')
+    fi
+
     # select and download respin if `origIsoSource` not given
     until [[ -n ${origIsoSource} ]]; do
-        PS3='please select fedora-live respin ISO image to download and customize: '
-        select origIsoSource in 'SELECT LOCAL ISO (NO DOWNLOAD)' $(wget --spider -r -l 1 --no-parent 'https://dl.fedoraproject.org/pub/alt/live-respins/' 2>&1 | grep -F 'https://dl.fedoraproject.org/pub/alt/live-respins' | sed -E 's/^.*\///;s/\]$//;s/'"'"' \.\.\.$//' | grep -E '^F' | sort -u) 
+        PS3='Please select which live ISO image to download (from https://dl.fedoraproject.org/pub/________) and customize: '
+        select origIsoSource in 'SELECT LOCAL ISO (NO DOWNLOAD)' "${origIsoSource_allPossible[@]}"
         do
             echo "You Chose: ${origIsoSource}"
             if (( ${REPLY} == 1 )); then
@@ -238,8 +252,8 @@ customIso_getOrigIso () {
                     do
                         (( ${REPLY} == 1 )) && origIsoSource=''
                         if (( ${REPLY} == 2 )); then
-                        	read -r -e -p 'Please enter the ISO Image path: '
-                        	find "${REPLY}" && origIsoSource="file://$(find "${REPLY}")" || { echo "${REPLY} not found. Ensure that you have requisite permissions to access the file. Returning to previous menu" >&2 && origIsoSource=''; }
+                            read -r -e -p 'Please enter the ISO Image path: '
+                            find "${REPLY}" && origIsoSource="file://$(find "${REPLY}")" || { echo "${REPLY} not found. Ensure that you have requisite permissions to access the file. Returning to previous menu" >&2 && origIsoSource=''; }
                         fi
                     break 
                     done
@@ -249,7 +263,7 @@ customIso_getOrigIso () {
                 fi
     
             else    
-                origIsoSource="https://dl.fedoraproject.org/pub/alt/live-respins/${origIsoSource}" 
+                origIsoSource="https://dl.fedoraproject.org/pub${origIsoSource}" 
             fi
         break
         done
@@ -267,7 +281,7 @@ customIso_getOrigIso () {
     if echo "${origIsoSource}" | grep -qE '^file:\/\/'; then
         origIsoFilePath="${origIsoSource#file:\/\/}"
 
-        isoVerifiedFlag=$(verifyIsoChecksum "${origIsoSource}")
+        isoVerifiedFlag=$(_verifyIsoChecksum "${origIsoSource}")
 
         ${isoVerifiedFlag} || exit 1
 
@@ -281,7 +295,7 @@ customIso_getOrigIso () {
             mapfile -t availIsoChecksums < <(wget --spider -r -l 1 --no-parent "${origIsoSource%/*}" 2>&1 | grep -F "${origIsoSource%/*}" | awk '{print $3}' | sed -E s/'^'"'"'(.*)'"'"'$'/'\1'/ | grep -i checksum | sort -u)
             (( ${#availIsoChecksums[@]} > 0 )) && wget --output-document="${origIsoFilePath}.checksum" "${availIsoChecksums[@]}"
             
-            isoVerifiedFlag=$(verifyIsoChecksum "${origIsoFilePath}")
+            isoVerifiedFlag=$(_verifyIsoChecksum "${origIsoFilePath}")
             ${isoVerifiedFlag} || rm -f "${origIsoFilePath}" "${origIsoFilePath}.checksum"
         done   
     fi      
@@ -472,14 +486,14 @@ customIso_setupDracutConf() {
     # setup a dracut config file on live ISO rootfs for when we call livemedia-creator later
     declare -a dracutAddModules=( bash systemd systemd-ask-password systemd-coredump systemd-initrd systemd-journald systemd-ldconfig systemd-modules-load systemd-rfkill systemd-sysctl systemd-sysext systemd-sysusers systemd-tmpfiles systemd-udevd systemd-veritysetup dbus drm crypt dm dmsquash-live dmsquash-live-ntfs dmsquash-live-autooverlay kernel-modules kernel-modules-extra kernel-network-modules livenet multipath crypt-gpg tpm2-tss iscsi lunmask resume rootfs-block terminfo udev-rules dracut-systemd pollcdrom base fs-lib img-lib shutdown squash uefi-lib convertfs qemu qemu-net biosdevname convertfs rngd terminfo modsign )
     
-    mapfile -t isoDracutModules < <(getIsoDracutModules)
+    mapfile -t isoDracutModules < <(_getIsoDracutModules)
 
     # filter down to dracut modules we can actually use
     mapfile -t dracutAddModules < <(printf '%s\n' "${dracutAddModules[@]}" | sort -u | grep -E -f <(printf '^%s$\n' "${isoDracutModules[@]}"))
     
     # add dracut.conf to rootfs.img
     [[ -f "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf ]] && \rm -f "${customIsoRootfsMountPoint}"/etc/dracut.conf.d/dracut-customLiveIso.conf
-    [[ -f  /etc/dracut.live.conf.d/dracut-customLiveIso.conf ]] && && \rm -f  /etc/dracut.live.conf.d/dracut-customLiveIso.conf
+    [[ -f  /etc/dracut.live.conf.d/dracut-customLiveIso.conf ]] && \rm -f  /etc/dracut.live.conf.d/dracut-customLiveIso.conf
     mkdir -p /etc/dracut.live.conf.d/
     ( 
         IFS=' '
@@ -500,7 +514,7 @@ EOF
     )
 
     # copy to host system
-    #dirAutoRename /etc/dracut.live.conf.d/dracut-customLiveIso.conf
+    #_dirAutoRename /etc/dracut.live.conf.d/dracut-customLiveIso.conf
     #\cp -f "${customIsoRootfsMountPoint}"/etc/dracut.live.conf.d/dracut-customLiveIso.conf /etc/dracut.live.conf.d/dracut-customLiveIso.conf
     
     # remove temp /lib/modules symlink in live ISO rootfs (if we made this earlier)
@@ -519,6 +533,11 @@ EOF
 customIso_setupDracutConf
 
 customIso_getLorax() {
+
+    # wait for internet for a few seconds
+    for nn in {1..10}; do
+        ping -c 1 gstatic.com &>/dev/null && break || sleep 1
+    done
     
     # clone lorax git repo
     [[ -d "${customIsoTmpDir}"/lorax ]] && rm -rf "${customIsoTmpDir}"/lorax 
@@ -553,7 +572,7 @@ customIso_mockBuildAnacondaBootIso() {
     sudo mount -o bind "${customIsoTmpDir}" "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}"
     
     # build anaconda boot.iso with lorax
-    dirAutoRename "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}/lorax/anaconda_iso"
+    _dirAutoRename "/var/lib/mock/fedora-${customIsoReleaseVer}-$(uname -m)/root/${customIsoTmpDir#/}/lorax/anaconda_iso"
  
      if curl https://dl.fedoraproject.org/pub/fedora/linux/releases/"${customIsoReleaseVer}"/Everything/x86_64/os/repodata/repomd.xml 2>/dev/null | grep -q '404 Not Found'; then
         sudo mock --enable-network -r fedora-${customIsoReleaseVer}-$(uname -m) --shell -- PATH="${customIsoTmpDir}/lorax/src/sbin/:${PATH}" PYTHONPATH="${customIsoTmpDir}/lorax/src/" "${customIsoTmpDir}/lorax/src/sbin/lorax" -p Fedora -v "${customIsoReleaseVer}" -r "${customIsoReleaseVer}" -s https://dl.fedoraproject.org/pub/fedora/linux/releases/"${customIsoReleaseVer}"/Everything/x86_64/os --sharedir "${customIsoTmpDir}/lorax/share/templates.d/99-generic/" "${customIsoTmpDir}/lorax/anaconda_iso/"
@@ -568,7 +587,7 @@ customIso_mockBuildAnacondaBootIso
 
 customIso_generateLiveIso() {
     # output dir must be empty or else livemedia-creator complains - rename it if it existsbootparam
-    dirAutoRename "${customIsoTmpDir}/ISO"
+    _dirAutoRename "${customIsoTmpDir}/ISO"
 
     mkdir -p "${customIsoTmpDir}"/tmp
     
@@ -577,6 +596,8 @@ customIso_generateLiveIso() {
 }
 
 customIso_generateLiveIso
+
+##### WARNING: livecd-iso-to-disk is buggy and may not work right / at all. You are probably better off using another tool to write the live ISO image to a usb.
 
 customIso_writeLiveUSB() {
     # write iso to usb to finish live image generation
