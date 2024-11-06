@@ -17,8 +17,6 @@ NOTE: GUI-based setup is not supported - you must be able to customize the syste
 
 NOTE: if you define customIsoUSBDevPath to be a valid device under /dev, the ISO will be burned to $customIsoUSBDevPath using `livecd-iso-to-disk`
 
-**WARNING**: Currently this does not work if the live ISO's `/boot` is on NTFS, because livemedia-creator adds in GRUB without NTFS support. This means that `/boot` *must* be FAT32, which in turn means that the maximum size of the squashfs root filesystem image in 4 GB. The vanilla live ISO images have squashfs root filesystems that are around 1.5-2gb, so you can add a good bit of stuff to the live image and keep it under 4 gb, but you can NOT add *everything* to them.
-
 # CODE
 
 The code is broken up into smaller sections, each of which is defined in a function and then that function is run. The code is fairly well commented - refer to it for more details. But, as a simplified high-level overview, this script downloads a live iso (or chooses 1 on disk), unsquashes it, mounts it, and uses systemd-nspawn to boot it into a container where you will be able to customize it from the CLI. After you are done customizing it, the script runs livemedia-creator using a basic kickstart file from the `lorax` git repo and using the freshly-customized rootfs.img as the base filesystem image. This will create a custom Live Fedora ISO that can be burned to disk. You can optionaly burn the ISO to a USB from this from the script using `livecd-iso-to-disk`, though externally using fedora-media-writer or a 3rd party tool like Rufus works as well.
