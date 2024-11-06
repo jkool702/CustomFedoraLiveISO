@@ -164,7 +164,7 @@ else
 fi
 
 # set INT trap for debugging
-_trap_int() (
+_trap_int() {
     printf '%s\n' "" "Type the letter(s) (shown below) representing the command(s) you want run." "Press <enter> to return to what was running when the interrupt was caught." "" "[q] to Quit (runs 'exit')" "[r] to Return (runs 'return')" "[u] to Unset this INT trap permanently (makes <ctrl> + <c> / interrupts behave normally again)" "[x] to eXecute a (1 line) command" "[p] to print the Present working directory ({$PWD}) to stderr" "[P] to Print the value of a specific variable to stderr" "[i] to print Information about what caller/function/script/line/command is currently running to stderr" "[d] / [D] to [start] (set -xv) / to [stop] (set +xv) printing Debug output to stderr" "[v] / [V] to write Variables (declare -p) to [stderr] / to [file (${PWD}/.vars)]" "[f] / [F] to write Functions (declare -f) to [stderr] / to [file (${PWD}/.funcs)]" "[a] / [A] to write Aliases (alias) to [stderr] / to [file (${PWD}/.aliases)]" "[e] / [E] to write Environment (env) to [stderr] / to [file (${PWD}/.env)]" "" "Selection:  " "" >&2; 
     while read -r -N 1 && [[ ${REPLY//$'\n'/} ]]; do
         case "${REPLY}" in 
@@ -187,10 +187,10 @@ _trap_int() (
             E) env >"${PWD}"/.env ;; 
         esac
     done
-)
+}
     
-#trap 'eval "$(declare -f _trap_int | { read; cat; })"' INT
 trap '_trap_int' INT
+#trap 'eval "$(declare -f _trap_int | { read; cat; })"' INT
 
 customIso_init() {
     # check inputs and set defaults
@@ -250,26 +250,21 @@ customIso_getOrigIso () {
         do
             echo "You Chose: ${origIsoSource}"
             if (( ${REPLY} == 1 )); then
-                if [[ -n $(find "${customIsoTmpDir}" -iname '*.iso') ]]; then
-                    PS3="Please choose local iso file (found under ${customIsoTmpDir}) to use: "
-                    select origIsoSource in 'GO BACK TO PREVIOUS MENU' 'INPUT PATH' $(find "${customIsoTmpDir}" -iname '*.iso' | sed -E s/'^'/'file:\/\/'/)
-                    do
-                        (( ${REPLY} == 1 )) && origIsoSource=''
-                        if (( ${REPLY} == 2 )); then
-                            read -r -e -p 'Please enter the ISO Image path: '
-                            find "${REPLY}" && origIsoSource="file://$(find "${REPLY}")" || { echo "${REPLY} not found. Ensure that you have requisite permissions to access the file. Returning to previous menu" >&2 && origIsoSource=''; }
-                        fi
+                PS3="Please choose local iso file to use or provide a path to one: "
+                select origIsoSource in 'GO BACK TO PREVIOUS MENU' 'INPUT PATH' $(find "${customIsoTmpDir}" -iname '*.iso' | sed -E s/'^'/'file:\/\/'/)
+                do
+                    (( ${REPLY} == 1 )) && origIsoSource=''
+                    if (( ${REPLY} == 2 )); then
+                        read -r -e -p 'Please enter the ISO Image path: '
+                        find "${REPLY}" -iname '*.iso' && origIsoSource="file://$(find "${REPLY}" -iname '*.iso' 2>/dev/null | head -n 1)" || { echo "${REPLY} not found. Ensure that you have requisite permissions to access the file. Returning to previous menu" >&2 && origIsoSource=''; }
+                    fi
                     break 
-                    done
-                else
-                    echo -e "NO ISO FILES FOUND UNDER ${customIsoTmpDir}! \nPlease add one here or select one of a respin to download" >&2
-                    origIsoSource=''
-                fi
-    
+                done
+                [[ -z ${origIsoSource} ]] && printf 'NO ISO FILES FOUND/SELECTED! \nPlease provide a valid path or add one to "%s" or select one to download' "${customIsoTmpDir}" >&2
             else    
                 origIsoSource="https://dl.fedoraproject.org/pub${origIsoSource}" 
             fi
-        break
+            [[ ${origIsoSource} ]] && break || { PS3='Please select which live ISO image to download (from https://dl.fedoraproject.org/pub/________) and customize: '; echo >/dev/tty; }
         done
     done
     
