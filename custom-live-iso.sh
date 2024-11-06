@@ -2,6 +2,9 @@
 
 #https://github.com/jkool702/CustomFedoraLiveISO/blob/main/custom-live-iso.sh
 
+# NOTE: You probably want to source this script instead of running it (i.e., use `. ./custom=live-iso.sh`, not `./custom-live-iso.sh`)
+#       By sourcing it the variables/functions defined here will remain after exit, making it much easier to manually continue the process should something go wrong unexpectedly.
+
 # # # # # # # # # # # # # # SET PARAMETERS  # # # # # # # # # # # # # # # # # 
 # all paramaters (except for customIsoUSBDevPath) will be assigned default values or assigned via a user-interactive prompt if left blank
 
@@ -12,8 +15,8 @@
 #customIsoFsLabel='FEDORA-37-KDE-LIVE-CUSTOM'     # filesystem label. Default is "${origIsoFileName%.iso}-CUSTOM"
 #customIsoLabelShort='F37-KDE-LIVE'             # short filesystem label
 #customIsoUSBDevPath=/dev/sdk                     # dev path for usb to write ISO to. Leave blank to just make the ISO without burning it to a USB
-rootfsSizeGB=64                                 # this is how much space youll have in the live OS. Because this is in a squashfs increasing the free space doesnt really increase the ISO size much. Default is 16 GB.
-useNvidiaFlag=true                               # true/false. this adds stuff to the dracut (drivers + kernel cmdline) to *hopefully* make the nvidia modules load and not the nouveau ones. default depends on if there is any trace on nvidia on the host system.
+#rootfsSizeGB=64                                 # this is how much space youll have in the live OS. Because this is in a squashfs increasing the free space doesnt really increase the ISO size much. Default is 16 GB.
+#useNvidiaFlag=true                               # true/false. this adds stuff to the dracut (drivers + kernel cmdline) to *hopefully* make the nvidia modules load and not the nouveau ones. default depends on if there is any trace on nvidia on the host system.
 
 # TO USE PRE-DOWNLOADED IMAGE, SPECIFY origIsoSource="file://<path>" --OR-- leave origIsoSource blank and place/link the ISO somewhere under $customIsoTmpDir
 # if left blank, you will be promoted to choose one of the current fedora "respins" to download OR to choose a local ISO found somewhere under $customIsoTmpDir
@@ -152,19 +155,19 @@ _cleanup_umount() {
 
 # # # # # # # # # # # # # # BEGIN SCRIPT # # # # # # # # # # # # # # # # # 
 
-# set selinux to permissive
-setenforce 0
+# set trap for cleanup + set selinux to permissive
+if [[ $(getenforce) == 'enforcing' ]]; then
+    trap '_cleanup_umount; sudo setenforce 1' EXIT HUP TERM
+    sudo setenforce 0
+else
+    trap '_cleanup_umount' EXIT HUP TERM 
+fi
 
-# set trap for cleanup
-trap _cleanup_umount EXIT HUP TERM QUIT ABRT
-
+# set INT trap for debugging
 _trap_int() (
-    shopt -s patsub_replacement
-    local nn
-    printf '%s\n' "" "Type the letter(s) representing the command(s) you want run, then press <enter> to execute them" "" "[q] to Quit (exit)" "[r] to Return to what you were running (i.e.,leave this INT trap)" "[u] to Unset this INT trap (after which <ctrl> + <c> will send interrupts / behave normally again)" "[x] to eXecute a (1 line) command" "[p] to print the Present working directory ({$PWD}) to stderr" "[P] to Print the value of a specific variable to stderr" "[i] to print Information about what caller/function/script/line/command is currently running to stderr" "[d] / [D] to [start] (set -xv) / to [stop] (set +xv) printing Debug output to stderr" "[v] / [V] to write Variables (declare -p) to [stderr] / to [file (${PWD}/.vars)]" "[f] / [F] to write Functions (declare -f) to [stderr] / to [file (${PWD}/.funcs)]" "[a] / [A] to write Aliases (alias) to [stderr] / to [file (${PWD}/.aliases)]" "[e] / [E] to write Environment (env) to [stderr] / to [file (${PWD}/.env)]" "" "Selection:  " "" >&2;     read -r 
-    printf '\n\n' >&2
-    for nn in ${REPLY//[[:alnum:]]/& }; do
-        case "${nn}" in 
+    printf '%s\n' "" "Type the letter(s) (shown below) representing the command(s) you want run." "Press <enter> to return to what was running when the interrupt was caught." "" "[q] to Quit (runs 'exit')" "[r] to Return (runs 'return')" "[u] to Unset this INT trap permanently (makes <ctrl> + <c> / interrupts behave normally again)" "[x] to eXecute a (1 line) command" "[p] to print the Present working directory ({$PWD}) to stderr" "[P] to Print the value of a specific variable to stderr" "[i] to print Information about what caller/function/script/line/command is currently running to stderr" "[d] / [D] to [start] (set -xv) / to [stop] (set +xv) printing Debug output to stderr" "[v] / [V] to write Variables (declare -p) to [stderr] / to [file (${PWD}/.vars)]" "[f] / [F] to write Functions (declare -f) to [stderr] / to [file (${PWD}/.funcs)]" "[a] / [A] to write Aliases (alias) to [stderr] / to [file (${PWD}/.aliases)]" "[e] / [E] to write Environment (env) to [stderr] / to [file (${PWD}/.env)]" "" "Selection:  " "" >&2; 
+    while read -r -N 1 && [[ ${REPLY//$'\n'/} ]]; do
+        case "${REPLY}" in 
             q) exit ;; 
             r) return ;;
             u) trap - INT ;; 
@@ -186,6 +189,7 @@ _trap_int() (
     done
 )
     
+#trap 'eval "$(declare -f _trap_int | { read; cat; })"' INT
 trap '_trap_int' INT
 
 customIso_init() {
@@ -317,10 +321,14 @@ customIso_prepRootfs() {
         rootfsOrigSize=$(du "${customIsoRootfsPath}" --bytes | awk '{print $1}')
 
         # zero-pad image to ${rootfsSizeGB} GiB
-        dd if=/dev/zero count=$(( ( ( ${rootfsSizeGB} << 30 )  - ${rootfsOrigSize} ) >> 20 )) bs=$(( 1 << 20 )) >> "${customIsoRootfsPath}"
-        (( $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') == ( ${rootfsSizeGB} >> 30 ) )) || dd if=/dev/zero bs=$(( ( ${rootfsSizeGB} >> 30 )  - $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') )) count=1 >> "${customIsoRootfsPath}"
-
-        fallocate -p -o ${rootfsOrigSize} -l $(( $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}')  - ${rootfsOrigSize} )) "${customIsoRootfsPath}"
+        for (( kk=0; kk<$(( ( ( ${rootfsSizeGB} << 30 )  - ${rootfsOrigSize} ) >> 30 )); kk++ )); do
+            dd if=/dev/zero count=1024 bs=$(( 1 << 20 )) >>"${customIsoRootfsPath}"
+            fallocate -p -o $(( ( kk << 30) + ${rootfsOrigSize} )) -l $((1<<30)) "${customIsoRootfsPath}"
+        done
+        (( $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') == ( ${rootfsSizeGB} >> 30 ) )) || {
+            dd if=/dev/zero bs=$(( ( 1 >> 30 ) - rootfsOrigSize )) count=1 >> "${customIsoRootfsPath}"
+            fallocate -p -o $(( ( kk << 30) + ${rootfsOrigSize} )) -l $(( ( 1 >> 30 ) - rootfsOrigSize )) "${customIsoRootfsPath}"
+        }
 
         sudo umount -R "${customIsoRootfsMountPoint}"
         sudo umount -R "${customIsoRootfsPath}"
@@ -338,8 +346,10 @@ customIso_prepRootfs() {
         # setup empty ext4 rootfs.img
         customIsoRootfsPath="${customIsoRootfsDir}"/rootfs.img
         : >"${customIsoRootfsPath}"
-        dd if=/dev/zero count=$(( ${rootfsSizeGB} << 10 )) bs=$(( 1 << 20 )) >>"${customIsoRootfsPath}"
-        fallocate -p -o 0 -l $(( ${rootfsSizeGB} << 30 )) "${customIsoRootfsPath}"
+        for (( kk=0; kk<${rootfsSizeGB}; kk++ )); do
+            dd if=/dev/zero count=1024 bs=$(( 1 << 20 )) >>"${customIsoRootfsPath}"
+            fallocate -p -o $(( kk << 30 )) -l $((1<<30)) "${customIsoRootfsPath}"
+        done
         mkfs.ext4 "${customIsoRootfsPath}"
 
         # unsquash data to rootfs image
