@@ -1,4 +1,4 @@
-#!/usr/bin/bash -x
+#!/usr/bin/env bash
 
 #https://github.com/jkool702/CustomFedoraLiveISO/blob/main/custom-live-iso.sh
 
@@ -317,11 +317,11 @@ customIso_prepRootfs() {
 
         # zero-pad image to ${rootfsSizeGB} GiB
         for (( kk=0; kk<$(( ( ( ${rootfsSizeGB} << 30 )  - ${rootfsOrigSize} ) >> 30 )); kk++ )); do
-            dd if=/dev/zero count=1024 bs=$(( 1 << 20 )) >>"${customIsoRootfsPath}"
+            dd if=/dev/zero count=1024 bs=$(( 1 << 20 )) status=none >>"${customIsoRootfsPath}"
             fallocate -p -o $(( ( kk << 30) + ${rootfsOrigSize} )) -l $((1<<30)) "${customIsoRootfsPath}"
         done
         (( $(du "${customIsoRootfsPath}" --bytes | awk '{print $1}') == ( ${rootfsSizeGB} >> 30 ) )) || {
-            dd if=/dev/zero bs=$(( ( 1 >> 30 ) - rootfsOrigSize )) count=1 >> "${customIsoRootfsPath}"
+            dd if=/dev/zero bs=$(( ( 1 >> 30 ) - rootfsOrigSize )) count=1 status=none >> "${customIsoRootfsPath}"
             fallocate -p -o $(( ( kk << 30) + ${rootfsOrigSize} )) -l $(( ( 1 >> 30 ) - rootfsOrigSize )) "${customIsoRootfsPath}"
         }
 
@@ -342,7 +342,7 @@ customIso_prepRootfs() {
         customIsoRootfsPath="${customIsoRootfsDir}"/rootfs.img
         : >"${customIsoRootfsPath}"
         for (( kk=0; kk<${rootfsSizeGB}; kk++ )); do
-            dd if=/dev/zero count=1024 bs=$(( 1 << 20 )) >>"${customIsoRootfsPath}"
+            dd if=/dev/zero count=1024 bs=$(( 1 << 20 )) status=none >>"${customIsoRootfsPath}"
             fallocate -p -o $(( kk << 30 )) -l $((1<<30)) "${customIsoRootfsPath}"
         done
         mkfs.ext4 "${customIsoRootfsPath}"
@@ -612,4 +612,4 @@ customIso_writeLiveUSB() {
 [[ -n ${customIsoUSBDevPath} ]] && find "${customIsoUSBDevPath}" 1>/dev/null && customIso_writeLiveUSB
     
 
-# Run all the functions defined above to generate Iso
+# Run all the functions defined above to generate live ISO image
